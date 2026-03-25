@@ -120,6 +120,37 @@ class BriefingRow(Base):
     stats_json = Column(Text, default="{}")
 
 
+class GeofenceRow(Base):
+    """A named geofence zone (polygon)."""
+
+    __tablename__ = "geofences"
+
+    id = Column(String, primary_key=True, default=_new_id)
+    name = Column(String, nullable=False)
+    coords_json = Column(Text, nullable=False)  # [[lat,lon], ...]
+    alert_on_enter = Column(Float, default=1)  # 1=true, 0=false
+    alert_on_exit = Column(Float, default=0)
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+
+
+class AlertRow(Base):
+    """A triggered alert."""
+
+    __tablename__ = "alerts"
+
+    id = Column(String, primary_key=True, default=_new_id)
+    alert_type = Column(String, nullable=False)  # geofence, low_battery, high_conf, entity_new
+    severity = Column(String, default="warning")  # info, warning, critical
+    title = Column(String, nullable=False)
+    body = Column(Text, default="")
+    source_id = Column(String, default="")
+    lat = Column(Float)
+    lon = Column(Float)
+    acknowledged = Column(Float, default=0)  # 0=false, 1=true
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+    meta_json = Column(Text, default="{}")
+
+
 # ---------------------------------------------------------------------------
 # Pydantic schemas (API request/response)
 # ---------------------------------------------------------------------------
@@ -238,5 +269,67 @@ class DashboardStats(BaseModel):
     total_telemetry_points: int
     total_entities: int
     total_briefings: int
+    total_alerts: int = 0
+    total_geofences: int = 0
     latest_detection: datetime | None
     latest_intel: datetime | None
+
+
+class GeofenceIn(BaseModel):
+    name: str
+    coords: list[list[float]]  # [[lat, lon], ...]
+    alert_on_enter: bool = True
+    alert_on_exit: bool = False
+
+
+class GeofenceOut(BaseModel):
+    id: str
+    name: str
+    coords: list[list[float]] = Field(default_factory=list)
+    alert_on_enter: bool = True
+    alert_on_exit: bool = False
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class AlertOut(BaseModel):
+    id: str
+    alert_type: str
+    severity: str
+    title: str
+    body: str
+    source_id: str
+    lat: float | None
+    lon: float | None
+    acknowledged: bool = False
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class DeviceHealth(BaseModel):
+    device_name: str
+    last_seen: datetime
+    lat: float
+    lon: float
+    battery_pct: float | None
+    altitude: float | None
+    speed: float | None
+    staleness_seconds: float
+    status: str  # online, stale, offline
+
+
+class EntityTimelineEntry(BaseModel):
+    source_type: str  # detection, intel
+    source_id: str
+    label: str
+    timestamp: datetime
+    lat: float | None = None
+    lon: float | None = None
+
+
+class ReplayFrame(BaseModel):
+    timestamp: datetime
+    detections: list[DetectionOut]
+    telemetry: list[TelemetryOut]

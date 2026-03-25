@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from overwatch.api.routes import _get_session, router
 from overwatch.database import get_engine, get_session_factory, init_db
+from overwatch.events import subscribe, unsubscribe
 
 
 @asynccontextmanager
@@ -25,7 +26,6 @@ async def lifespan(app: FastAPI):
         finally:
             session.close()
 
-    # Override the session dependency
     app.dependency_overrides[_get_session] = session_dep
     yield
     engine.dispose()
@@ -36,7 +36,7 @@ app = FastAPI(
     description=(
         "Tactical ISR Dashboard API — unifies YOLO detections, OSINT intel, and drone telemetry"
     ),
-    version="0.1.0",
+    version="0.2.0",
     lifespan=lifespan,
 )
 
@@ -48,3 +48,22 @@ app.add_middleware(
 )
 
 app.include_router(router, prefix="/api")
+
+
+@app.websocket("/ws/feed")
+async def websocket_feed(websocket: WebSocket):
+    """Real-time event feed via WebSocket.
+
+    Broadcasts all ingest events (detections, intel, telemetry, alerts)
+    as they arrive.
+    """
+    await websocket.accept()
+    queue = subscribe()
+    try:
+        while True:
+            event = await queue.get()
+            await websocket.send_json(event)
+    except WebSocketDisconnect:
+        pass
+    finally:
+        unsubscribe(queue)
