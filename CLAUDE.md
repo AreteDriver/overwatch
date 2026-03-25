@@ -3,6 +3,14 @@
 ## Project Overview
 Tactical dashboard that unifies YOLO object detections, OSINT intel feeds (TheWire-STT), and drone telemetry into a single operational picture. Features real-time WebSocket feed, entity resolution, auto-briefing (template + Ollama LLM), geofencing, mesh node health, Discord alerts, detection heatmaps, entity timelines, replay mode, and briefing export. Built for rp9376's mesh-net ISR workflow, with Dossier and Animus integration points.
 
+## Current State
+
+- **Version**: 0.2.0
+- **Language**: Python 3.11+
+- **Tests**: 132
+- **Coverage**: 85%
+- **Live**: API (`overwatch-isr.fly.dev`) + Dashboard (`overwatch-dashboard.fly.dev`)
+
 ## Architecture
 - **Backend**: FastAPI + SQLAlchemy + SQLite (WAL mode) + WebSocket event bus
 - **Dashboard**: Streamlit with Folium maps (heatmap, geofences, draw tools, measure, minimap) + Plotly
@@ -13,24 +21,48 @@ Tactical dashboard that unifies YOLO object detections, OSINT intel feeds (TheWi
 ```
 overwatch/
 ├── overwatch/
-│   ├── api/routes.py        # 30+ REST endpoints
-│   ├── app.py               # FastAPI + WebSocket
-│   ├── events.py            # In-process event bus
-│   ├── ingest/              # Detection, intel, telemetry adapters
-│   ├── analysis/
-│   │   ├── alerts.py        # Threshold alerts + Discord webhook
-│   │   ├── briefing.py      # Template briefing generator
-│   │   ├── ollama_briefing.py # LLM briefing via local Ollama
-│   │   ├── entities.py      # Entity extraction + resolution
-│   │   ├── geofence.py      # Geofence CRUD + point-in-polygon
-│   │   ├── mesh_health.py   # Device heartbeat tracking
-│   │   └── replay.py        # Time-windowed data retrieval
-│   ├── models.py            # ORM + Pydantic (15 models)
-│   ├── database.py          # Engine + session factory
-│   └── config.py            # Env-driven configuration
-├── dashboard/app.py         # Streamlit (8 tabs)
-├── tools/yolo_watcher.py    # CLI: watch dir for YOLO output, auto-ingest
-└── tests/                   # 104 tests, 83% coverage
+│   ├── api/routes.py          # 25 REST endpoints
+│   ├── app.py                 # FastAPI + WebSocket + health
+│   ├── config.py              # Env-driven configuration (21 vars)
+│   ├── database.py            # Engine + session factory
+│   ├── events.py              # In-process async event bus
+│   ├── models.py              # ORM + Pydantic (15 models)
+│   ├── security.py            # Auth, rate-limit, headers middleware
+│   ├── crypto.py              # Optional Fernet field encryption
+│   ├── ingest/
+│   │   ├── detections.py      # YOLO detection ingestion
+│   │   ├── intel.py           # OSINT intel ingestion
+│   │   ├── telemetry.py       # Drone/sensor telemetry
+│   │   └── thewire_adapter.py # TheWire-STT format adapter
+│   └── analysis/
+│       ├── alerts.py          # Threshold alerts + Discord webhook
+│       ├── briefing.py        # Template briefing generator
+│       ├── ollama_briefing.py # LLM briefing via local Ollama
+│       ├── entities.py        # Entity extraction + resolution
+│       ├── geofence.py        # Geofence CRUD + point-in-polygon
+│       ├── mesh_health.py     # Device heartbeat tracking
+│       └── replay.py          # Time-windowed data retrieval
+├── dashboard/app.py           # Streamlit (8 tabs), reads API_URL + API_KEY from env
+├── tools/yolo_watcher.py      # CLI: watch dir for YOLO output, --api-key flag
+├── tests/                     # 132 tests, 85% coverage
+│   ├── conftest.py            # Shared fixtures (engine, session, now)
+│   ├── test_api.py            # REST endpoint tests
+│   ├── test_briefing.py       # Briefing generation tests
+│   ├── test_entities.py       # Entity resolution tests
+│   ├── test_ingest.py         # Data ingestion tests
+│   ├── test_models.py         # ORM + Pydantic schema tests
+│   ├── test_new_features.py   # New feature tests
+│   ├── test_security.py       # Auth, encryption, rate-limit tests
+│   ├── test_smoke.py          # Full write-path integration tests
+│   ├── test_websocket.py      # WebSocket feed tests
+│   └── test_yolo_watcher.py   # YOLO watcher CLI tests
+├── Dockerfile                 # API container (python:3.12-slim + uvicorn)
+├── Dockerfile.dashboard       # Dashboard container (python:3.12-slim + streamlit)
+├── fly.toml                   # Fly.io config — API (overwatch-isr)
+├── fly.dashboard.toml         # Fly.io config — Dashboard (overwatch-dashboard)
+├── pyproject.toml             # Build config, dependencies, ruff, pytest
+├── .github/workflows/ci.yml   # CI: pytest + ruff + 80% coverage gate
+└── .gitleaks.toml             # Secrets scanning config
 ```
 
 ## Common Commands
@@ -42,19 +74,27 @@ pip install -e ".[dev,dashboard]"
 # Run API server
 uvicorn overwatch.app:app --reload --port 8080
 
-# Run dashboard
+# Run dashboard (local, points at localhost:8080 by default)
 streamlit run dashboard/app.py --server.port 8520
+
+# Run dashboard pointed at production
+OVERWATCH_API_URL=https://overwatch-isr.fly.dev/api OVERWATCH_API_KEY=<key> streamlit run dashboard/app.py
 
 # YOLO watcher
 python tools/yolo_watcher.py --dir /path/to/yolo/output --lat 46.05 --lon 14.5
+python tools/yolo_watcher.py --dir ./runs --api-key <key>
 
 # Tests
-pytest                       # All 104 tests
-pytest -m smoke              # Smoke tests only
-pytest --cov=overwatch       # With coverage
+pytest                       # All 132 tests
+pytest -m smoke              # Smoke/integration tests only
+pytest --cov=overwatch       # With coverage report
 
 # Lint (always run BOTH)
 ruff check . && ruff format .
+
+# Deploy
+flyctl deploy -a overwatch-isr --wait-timeout 600           # API
+flyctl deploy --config fly.dashboard.toml --wait-timeout 600 # Dashboard
 ```
 
 ## Coding Standards
@@ -106,9 +146,11 @@ This tool targets ISR (intelligence, surveillance, reconnaissance) workflows:
 ## Security
 - **API key auth**: Set `OVERWATCH_API_KEY` env var. Supports `Authorization: Bearer <key>` and `X-API-Key` headers. Empty = open mode.
 - **WebSocket auth**: Pass `?key=<api_key>` query param on `/ws/feed`
+- **Dashboard auth**: Reads `OVERWATCH_API_KEY` from env, passes Bearer header on all API requests
+- **YOLO watcher auth**: `--api-key` flag or `OVERWATCH_API_KEY` env var
 - **Security headers**: X-Content-Type-Options, X-Frame-Options, XSS-Protection, HSTS, Referrer-Policy, Permissions-Policy
 - **Rate limiting**: Sliding window per IP. Configure via `OVERWATCH_RATE_LIMIT` (requests) and `OVERWATCH_RATE_WINDOW` (seconds)
-- **CORS lockdown**: Set `OVERWATCH_CORS_ORIGINS` to comma-separated origins (default `*`)
+- **CORS lockdown**: Set `OVERWATCH_CORS_ORIGINS` (JSON array on Fly.io, comma-separated locally)
 - **Field encryption**: Optional Fernet (AES-128-CBC) via `OVERWATCH_ENCRYPTION_KEY`. Install `cryptography` package to enable
 - **Health endpoint**: `/health` is always public (no auth required)
 - Security module: `overwatch/security.py`, crypto: `overwatch/crypto.py`
@@ -120,6 +162,7 @@ This tool targets ISR (intelligence, surveillance, reconnaissance) workflows:
 - Ollama briefings fall back to templates if Ollama unavailable
 - YOLO watcher uses polling (not inotify) for cross-platform compatibility
 - Security is opt-in: no API_KEY = open mode (dev-friendly), set key for production
+- Dashboard deployed as separate Fly.io app (512MB for Streamlit + Folium rendering)
 
 ## Integration Points
 - **Dossier**: Replace `overwatch.analysis.entities` with Dossier's NER + entity resolver
@@ -132,6 +175,8 @@ This tool targets ISR (intelligence, surveillance, reconnaissance) workflows:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `OVERWATCH_DATABASE_URL` | `~/.overwatch/overwatch.db` | SQLite path |
+| `OVERWATCH_API_KEY` | (empty) | API key for auth (empty = open mode) |
+| `OVERWATCH_API_URL` | `http://localhost:8080/api` | API URL (dashboard only) |
 | `OVERWATCH_DISCORD_WEBHOOK` | (empty) | Discord webhook URL |
 | `OVERWATCH_ALERT_CONFIDENCE` | `0.9` | High-confidence alert threshold |
 | `OVERWATCH_ALERT_BATTERY` | `20.0` | Low battery alert threshold (%) |
@@ -140,8 +185,7 @@ This tool targets ISR (intelligence, surveillance, reconnaissance) workflows:
 | `OLLAMA_URL` | `http://localhost:11434` | Ollama API URL |
 | `OLLAMA_MODEL` | `qwen2.5:14b` | Ollama model for LLM briefings |
 | `OLLAMA_ENABLED` | `false` | Enable Ollama briefings |
-| `OVERWATCH_API_KEY` | (empty) | API key for auth (empty = open mode) |
 | `OVERWATCH_ENCRYPTION_KEY` | (empty) | Fernet key for field encryption |
-| `OVERWATCH_CORS_ORIGINS` | `*` | Comma-separated allowed origins |
+| `OVERWATCH_CORS_ORIGINS` | `*` | Allowed origins (JSON array on Fly.io) |
 | `OVERWATCH_RATE_LIMIT` | `120` | Max requests per window per IP |
 | `OVERWATCH_RATE_WINDOW` | `60` | Rate limit window in seconds |
