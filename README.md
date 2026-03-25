@@ -145,14 +145,22 @@ overwatch/
 
 ## Deployment
 
-Deployed on [Fly.io](https://fly.io) as `overwatch-isr`:
+Deployed on [Fly.io](https://fly.io) as two apps:
+
+| App | URL | Config |
+|-----|-----|--------|
+| API | https://overwatch-isr.fly.dev | `fly.toml` |
+| Dashboard | https://overwatch-dashboard.fly.dev | `fly.dashboard.toml` |
 
 ```bash
-# Deploy (from project root)
-/home/arete/.fly/bin/flyctl deploy -a overwatch-isr --wait-timeout 600
+# Deploy API
+flyctl deploy -a overwatch-isr --wait-timeout 600
+
+# Deploy Dashboard
+flyctl deploy --config fly.dashboard.toml --wait-timeout 600
 ```
 
-Production secrets are set via `flyctl secrets set`. The health endpoint at `/health` is always public for uptime monitoring.
+Production secrets are set via `flyctl secrets set`. The health endpoint at `/health` is always public for uptime monitoring. Dashboard reads `OVERWATCH_API_URL` and `OVERWATCH_API_KEY` from environment to connect to the API.
 
 ## Development
 

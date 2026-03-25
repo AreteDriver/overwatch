@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 import folium
 import folium.plugins as folium_plugins
 import pandas as pd
@@ -14,7 +16,8 @@ from streamlit_folium import st_folium
 # Config
 # ---------------------------------------------------------------------------
 
-API_BASE = "http://localhost:8080/api"
+API_BASE = os.environ.get("OVERWATCH_API_URL", "http://localhost:8080/api").rstrip("/")
+API_KEY = os.environ.get("OVERWATCH_API_KEY", "")
 
 st.set_page_config(
     page_title="Overwatch — Tactical Dashboard",
@@ -29,9 +32,15 @@ st.set_page_config(
 # ---------------------------------------------------------------------------
 
 
+def _headers() -> dict[str, str]:
+    if API_KEY:
+        return {"Authorization": f"Bearer {API_KEY}"}
+    return {}
+
+
 def api_get(path: str, params: dict | None = None):
     try:
-        resp = requests.get(f"{API_BASE}{path}", params=params, timeout=5)
+        resp = requests.get(f"{API_BASE}{path}", params=params, headers=_headers(), timeout=5)
         resp.raise_for_status()
         return resp.json()
     except requests.RequestException:
@@ -40,7 +49,9 @@ def api_get(path: str, params: dict | None = None):
 
 def api_post(path: str, json_data=None, params: dict | None = None):
     try:
-        resp = requests.post(f"{API_BASE}{path}", json=json_data, params=params, timeout=10)
+        resp = requests.post(
+            f"{API_BASE}{path}", json=json_data, params=params, headers=_headers(), timeout=10
+        )
         resp.raise_for_status()
         return resp.json()
     except requests.RequestException:
@@ -49,7 +60,7 @@ def api_post(path: str, json_data=None, params: dict | None = None):
 
 def api_delete(path: str):
     try:
-        resp = requests.delete(f"{API_BASE}{path}", timeout=5)
+        resp = requests.delete(f"{API_BASE}{path}", headers=_headers(), timeout=5)
         resp.raise_for_status()
         return resp.json()
     except requests.RequestException:

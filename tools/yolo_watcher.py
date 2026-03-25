@@ -80,14 +80,18 @@ def parse_yolo_json(
     return detections
 
 
-def send_detections(api_url: str, detections: list[dict]) -> int:
+def send_detections(api_url: str, detections: list[dict], api_key: str = "") -> int:
     """Post detections to the Overwatch API. Returns count of ingested."""
     if not detections:
         return 0
+    headers: dict[str, str] = {}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
     try:
         resp = httpx.post(
             f"{api_url}/ingest/detections",
             json=detections,
+            headers=headers,
             timeout=10,
         )
         resp.raise_for_status()
@@ -103,6 +107,7 @@ def watch_directory(
     poll_interval: float = 2.0,
     lat: float | None = None,
     lon: float | None = None,
+    api_key: str = "",
 ) -> None:
     """Poll a directory for new JSON files and ingest them."""
     seen: set[str] = set()
@@ -123,7 +128,7 @@ def watch_directory(
             log.info("New file: %s", f.name)
             try:
                 dets = parse_yolo_json(f, default_lat=lat, default_lon=lon)
-                count = send_detections(api_url, dets)
+                count = send_detections(api_url, dets, api_key=api_key)
                 log.info("Ingested %d detections from %s", count, f.name)
             except (json.JSONDecodeError, OSError) as exc:
                 log.error("Failed to parse %s: %s", f.name, exc)
@@ -142,6 +147,11 @@ def main():
     parser.add_argument("--interval", type=float, default=2.0, help="Poll interval (seconds)")
     parser.add_argument("--lat", type=float, default=None, help="Default latitude for detections")
     parser.add_argument("--lon", type=float, default=None, help="Default longitude for detections")
+    parser.add_argument(
+        "--api-key",
+        default=os.getenv("OVERWATCH_API_KEY", ""),
+        help="API key for authentication",
+    )
     args = parser.parse_args()
 
     watch_path = Path(args.dir)
@@ -149,7 +159,7 @@ def main():
         log.error("Directory does not exist: %s", args.dir)
         sys.exit(1)
 
-    watch_directory(watch_path, args.api, args.interval, args.lat, args.lon)
+    watch_directory(watch_path, args.api, args.interval, args.lat, args.lon, api_key=args.api_key)
 
 
 if __name__ == "__main__":

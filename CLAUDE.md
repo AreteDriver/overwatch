@@ -81,7 +81,9 @@ Dev: `pytest`, `pytest-cov`, `pytest-asyncio`, `ruff`
 ## CI/CD
 - **GitHub Actions** (`.github/workflows/ci.yml`): pytest + ruff check + ruff format + 80% coverage gate
 - **Matrix**: Python 3.11, 3.12
-- **Deployment**: Fly.io (`overwatch-isr.fly.dev`), manual via `flyctl deploy`
+- **Deployment**: Fly.io — API (`overwatch-isr.fly.dev`), Dashboard (`overwatch-dashboard.fly.dev`)
+- **Deploy API**: `flyctl deploy -a overwatch-isr --wait-timeout 600`
+- **Deploy Dashboard**: `flyctl deploy --config fly.dashboard.toml --wait-timeout 600`
 - **Secrets scanning**: `.gitleaks.toml` configured
 
 ## Git Conventions
