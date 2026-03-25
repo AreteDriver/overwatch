@@ -78,6 +78,12 @@ Core: `fastapi`, `uvicorn`, `sqlalchemy`, `pydantic`, `httpx`, `python-dateutil`
 Dashboard: `streamlit`, `folium`, `streamlit-folium`, `plotly`, `pandas`
 Dev: `pytest`, `pytest-cov`, `pytest-asyncio`, `ruff`
 
+## CI/CD
+- **GitHub Actions** (`.github/workflows/ci.yml`): pytest + ruff check + ruff format + 80% coverage gate
+- **Matrix**: Python 3.11, 3.12
+- **Deployment**: Fly.io (`overwatch-isr.fly.dev`), manual via `flyctl deploy`
+- **Secrets scanning**: `.gitleaks.toml` configured
+
 ## Git Conventions
 - Conventional commits: `feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`
 - Run `pytest` and `ruff check .` before committing

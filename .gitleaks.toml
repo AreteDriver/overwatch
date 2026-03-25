@@ -1,0 +1,9 @@
+title = "Overwatch gitleaks config"
+
+[allowlist]
+  description = "Global allowlist"
+  paths = [
+    '''^\.venv/''',
+    '''^\.git/''',
+    '''node_modules/''',
+  ]
