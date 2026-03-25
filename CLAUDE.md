@@ -95,12 +95,23 @@ This tool targets ISR (intelligence, surveillance, reconnaissance) workflows:
 - **Mesh Health**: Device heartbeat tracking (online/stale/offline status)
 - **Replay**: Time-windowed post-mission review with animated map
 
+## Security
+- **API key auth**: Set `OVERWATCH_API_KEY` env var. Supports `Authorization: Bearer <key>` and `X-API-Key` headers. Empty = open mode.
+- **WebSocket auth**: Pass `?key=<api_key>` query param on `/ws/feed`
+- **Security headers**: X-Content-Type-Options, X-Frame-Options, XSS-Protection, HSTS, Referrer-Policy, Permissions-Policy
+- **Rate limiting**: Sliding window per IP. Configure via `OVERWATCH_RATE_LIMIT` (requests) and `OVERWATCH_RATE_WINDOW` (seconds)
+- **CORS lockdown**: Set `OVERWATCH_CORS_ORIGINS` to comma-separated origins (default `*`)
+- **Field encryption**: Optional Fernet (AES-128-CBC) via `OVERWATCH_ENCRYPTION_KEY`. Install `cryptography` package to enable
+- **Health endpoint**: `/health` is always public (no auth required)
+- Security module: `overwatch/security.py`, crypto: `overwatch/crypto.py`
+
 ## Design Decisions
 - SQLite for zero-config portability (target user runs everything local)
 - In-process event bus (asyncio.Queue) for WebSocket — no Redis needed at this scale
 - Geofence uses ray-casting point-in-polygon (no external geo library needed)
 - Ollama briefings fall back to templates if Ollama unavailable
 - YOLO watcher uses polling (not inotify) for cross-platform compatibility
+- Security is opt-in: no API_KEY = open mode (dev-friendly), set key for production
 
 ## Integration Points
 - **Dossier**: Replace `overwatch.analysis.entities` with Dossier's NER + entity resolver
@@ -121,3 +132,8 @@ This tool targets ISR (intelligence, surveillance, reconnaissance) workflows:
 | `OLLAMA_URL` | `http://localhost:11434` | Ollama API URL |
 | `OLLAMA_MODEL` | `qwen2.5:14b` | Ollama model for LLM briefings |
 | `OLLAMA_ENABLED` | `false` | Enable Ollama briefings |
+| `OVERWATCH_API_KEY` | (empty) | API key for auth (empty = open mode) |
+| `OVERWATCH_ENCRYPTION_KEY` | (empty) | Fernet key for field encryption |
+| `OVERWATCH_CORS_ORIGINS` | `*` | Comma-separated allowed origins |
+| `OVERWATCH_RATE_LIMIT` | `120` | Max requests per window per IP |
+| `OVERWATCH_RATE_WINDOW` | `60` | Rate limit window in seconds |

@@ -40,3 +40,12 @@ OLLAMA_ENABLED: bool = os.getenv("OLLAMA_ENABLED", "false").lower() == "true"
 # YOLO watcher
 YOLO_WATCH_DIR: str = os.getenv("YOLO_WATCH_DIR", "")
 YOLO_API_URL: str = os.getenv("YOLO_API_URL", "http://localhost:8080/api")
+
+# Security
+API_KEY: str = os.getenv("OVERWATCH_API_KEY", "")  # empty = open mode
+ENCRYPTION_KEY: str = os.getenv("OVERWATCH_ENCRYPTION_KEY", "")  # Fernet key for sensitive fields
+CORS_ORIGINS: list[str] = [
+    o.strip() for o in os.getenv("OVERWATCH_CORS_ORIGINS", "*").split(",") if o.strip()
+]
+RATE_LIMIT_REQUESTS: int = int(os.getenv("OVERWATCH_RATE_LIMIT", "120"))
+RATE_LIMIT_WINDOW: float = float(os.getenv("OVERWATCH_RATE_WINDOW", "60"))
