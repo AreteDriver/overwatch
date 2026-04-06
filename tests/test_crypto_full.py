@@ -8,9 +8,17 @@ import logging
 from unittest.mock import patch
 
 import pytest
-from cryptography.fernet import Fernet
+
+try:
+    from cryptography.fernet import Fernet
+
+    HAS_CRYPTOGRAPHY = True
+except ImportError:
+    HAS_CRYPTOGRAPHY = False
 
 from overwatch.crypto import decrypt, encrypt, hash_value
+
+pytestmark = pytest.mark.skipif(not HAS_CRYPTOGRAPHY, reason="cryptography package not installed")
 
 # ---------------------------------------------------------------------------
 # 1. No encryption key (default pass-through)
