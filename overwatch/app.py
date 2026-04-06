@@ -114,9 +114,10 @@ app.add_middleware(
 # Auth dependency on all API routes
 @app.middleware("http")
 async def auth_middleware(request, call_next):
-    """Enforce API key on all non-public routes."""
+    """Enforce API key on all non-public routes (master key or any active DB key)."""
     try:
-        verify_api_key(request)
+        sf = getattr(app.state, "session_factory", None)
+        verify_api_key(request, session_factory=sf)
     except Exception as exc:
         return JSONResponse(
             status_code=getattr(exc, "status_code", 401),
@@ -140,7 +141,7 @@ def health_check():
         TelemetryRow,
     )
 
-    result: dict = {"status": "ok", "version": "0.3.0"}
+    result: dict = {"status": "ok", "version": "0.3.0", "service": "overwatch-isr"}
 
     try:
         session = app.state.session_factory()

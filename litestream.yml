@@ -1,0 +1,11 @@
+dbs:
+  - path: /data/overwatch.db
+    replicas:
+      - type: s3
+        bucket: ${LITESTREAM_REPLICA_BUCKET}
+        path: overwatch
+        endpoint: ${LITESTREAM_REPLICA_ENDPOINT}
+        access-key-id: ${AWS_ACCESS_KEY_ID}
+        secret-access-key: ${AWS_SECRET_ACCESS_KEY}
+        sync-interval: 10s
+        retention: 168h

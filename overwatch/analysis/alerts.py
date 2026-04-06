@@ -17,6 +17,7 @@ from overwatch.config import (
     ALERT_LOW_BATTERY,
     DISCORD_WEBHOOK_URL,
 )
+from overwatch.events import publish
 from overwatch.models import AlertRow
 
 log = logging.getLogger(__name__)
@@ -47,6 +48,7 @@ def check_detection_alerts(session: Session, data: dict[str, Any]) -> list[Alert
         session.commit()
         for a in alerts:
             _dispatch_discord(a)
+            publish("alert", {"alert_type": a.alert_type, "title": a.title, "severity": a.severity})
     return alerts
 
 
@@ -75,6 +77,7 @@ def check_telemetry_alerts(session: Session, data: dict[str, Any]) -> list[Alert
         session.commit()
         for a in alerts:
             _dispatch_discord(a)
+            publish("alert", {"alert_type": a.alert_type, "title": a.title, "severity": a.severity})
     return alerts
 
 
@@ -107,6 +110,7 @@ def check_geofence_alerts(
         session.commit()
         for a in alerts:
             _dispatch_discord(a)
+            publish("alert", {"alert_type": a.alert_type, "title": a.title, "severity": a.severity})
     return alerts
 
 

@@ -40,9 +40,10 @@ def _is_public(path: str) -> bool:
     return path in PUBLIC_PATHS or path.startswith("/docs") or path.startswith("/redoc")
 
 
-def verify_api_key(request: Request) -> None:
+def verify_api_key(request: Request, session_factory: object | None = None) -> None:
     """Verify API key from Authorization header.
 
+    Checks master key first, then DB-stored keys if session_factory is provided.
     Raises HTTPException 401 if invalid.
     Does nothing if API_KEY is not configured (open mode).
     """
@@ -52,14 +53,7 @@ def verify_api_key(request: Request) -> None:
     if _is_public(request.url.path):
         return
 
-    auth = request.headers.get("Authorization", "")
-    if auth.startswith("Bearer "):
-        token = auth[7:]
-    elif auth:
-        token = auth
-    else:
-        # Also check X-API-Key header
-        token = request.headers.get("X-API-Key", "")
+    token = _extract_token(request)
 
     if not token:
         raise HTTPException(
@@ -67,9 +61,27 @@ def verify_api_key(request: Request) -> None:
             detail="Missing API key. Use Authorization: Bearer <key> or X-API-Key header.",
         )
 
-    # Constant-time comparison via hash
-    if hashlib.sha256(token.encode()).hexdigest() != hashlib.sha256(API_KEY.encode()).hexdigest():
-        raise HTTPException(status_code=401, detail="Invalid API key.")
+    # Check master key first
+    if _hash_key(token) == _hash_key(API_KEY):
+        return
+
+    # Check DB-stored keys (any active key passes gateway auth)
+    if session_factory is not None:
+        from overwatch.models import ApiKeyRow
+
+        session = session_factory()
+        try:
+            row = (
+                session.query(ApiKeyRow)
+                .filter(ApiKeyRow.key_hash == _hash_key(token), ApiKeyRow.active == 1)
+                .first()
+            )
+            if row is not None:
+                return
+        finally:
+            session.close()
+
+    raise HTTPException(status_code=401, detail="Invalid API key.")
 
 
 def verify_ws_api_key(websocket: WebSocket) -> bool:

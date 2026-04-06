@@ -7,8 +7,8 @@ Tactical dashboard that unifies YOLO object detections, OSINT intel feeds (TheWi
 
 - **Version**: 0.3.0
 - **Language**: Python 3.11+
-- **Tests**: 197
-- **Coverage**: 83%
+- **Tests**: 251
+- **Coverage**: 89%
 - **Live**: API (`overwatch-isr.fly.dev`) + Dashboard (`overwatch-dashboard.fly.dev`)
 
 ## Architecture
@@ -47,7 +47,7 @@ overwatch/
 │       └── rules.py           # Configurable alerting rules engine
 ├── dashboard/app.py           # Streamlit (8 tabs), reads API_URL + API_KEY from env
 ├── tools/yolo_watcher.py      # CLI: watch dir for YOLO output, --api-key flag
-├── tests/                     # 197 tests, 83% coverage
+├── tests/                     # 251 tests, 89% coverage
 │   ├── conftest.py            # Shared fixtures (engine, session, now)
 │   ├── test_api.py            # REST endpoint tests
 │   ├── test_api_keys.py       # Multi-user API key tests
@@ -60,6 +60,8 @@ overwatch/
 │   ├── test_replay_v2.py      # Replay filtering + speed + summary tests
 │   ├── test_retention.py      # Data retention/purge tests
 │   ├── test_rules.py          # Alert rules engine tests
+│   ├── test_rules_edge.py     # Rules edge case + compare tests
+│   ├── test_events_dispatch.py # Webhook dispatch + HMAC tests
 │   ├── test_security.py       # Auth, encryption, rate-limit tests
 │   ├── test_smoke.py          # Full write-path integration tests
 │   ├── test_webhooks.py       # Webhook subscription tests
@@ -94,7 +96,7 @@ python tools/yolo_watcher.py --dir /path/to/yolo/output --lat 46.05 --lon 14.5
 python tools/yolo_watcher.py --dir ./runs --api-key <key>
 
 # Tests
-pytest                       # All 197 tests
+pytest                       # All 251 tests
 pytest -m smoke              # Smoke/integration tests only
 pytest --cov=overwatch       # With coverage report
 
@@ -178,6 +180,10 @@ This tool targets ISR (intelligence, surveillance, reconnaissance) workflows:
 - Data retention: background purge loop + manual `/api/admin/purge` endpoint, configurable TTL
 - Bulk export: CSV + GeoJSON endpoints for detections, intel, telemetry (up to 50K rows)
 - Replay filtering: event_types param, speed multiplier, summary endpoint for timeline UI
+- Scoped auth: middleware accepts both master + DB keys; endpoint deps enforce scope (write for ingest, admin for management)
+- Litestream: SQLite WAL replication to Tigris S3, 10s sync, 168h retention, restore-on-boot via run.sh
+- Alert→webhook pipeline: alerts publish to event bus → webhooks auto-dispatch (detection → alert → webhook in one flow)
+- YOLO watcher `--model` flag records model version in detection meta for audit trail
 - Dashboard deployed as separate Fly.io app (512MB for Streamlit + Folium rendering)
 
 ## Integration Points

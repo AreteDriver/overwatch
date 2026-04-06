@@ -41,7 +41,10 @@ log = logging.getLogger(__name__)
 
 
 def parse_yolo_json(
-    filepath: Path, default_lat: float | None = None, default_lon: float | None = None
+    filepath: Path,
+    default_lat: float | None = None,
+    default_lon: float | None = None,
+    model_version: str = "",
 ) -> list[dict]:
     """Parse a YOLO ultralytics JSON output file into detection payloads."""
     with open(filepath) as f:
@@ -74,6 +77,7 @@ def parse_yolo_json(
                 "meta": {
                     "file": str(filepath.name),
                     "class_id": det.get("class", -1),
+                    **({"model_version": model_version} if model_version else {}),
                 },
             }
         )
@@ -108,6 +112,7 @@ def watch_directory(
     lat: float | None = None,
     lon: float | None = None,
     api_key: str = "",
+    model_version: str = "",
 ) -> None:
     """Poll a directory for new JSON files and ingest them."""
     seen: set[str] = set()
@@ -127,7 +132,12 @@ def watch_directory(
 
             log.info("New file: %s", f.name)
             try:
-                dets = parse_yolo_json(f, default_lat=lat, default_lon=lon)
+                dets = parse_yolo_json(
+                    f,
+                    default_lat=lat,
+                    default_lon=lon,
+                    model_version=model_version,
+                )
                 count = send_detections(api_url, dets, api_key=api_key)
                 log.info("Ingested %d detections from %s", count, f.name)
             except (json.JSONDecodeError, OSError) as exc:
@@ -152,6 +162,11 @@ def main():
         default=os.getenv("OVERWATCH_API_KEY", ""),
         help="API key for authentication",
     )
+    parser.add_argument(
+        "--model",
+        default="",
+        help="YOLO model version (e.g. yolov8n, yolov5s) for audit trail",
+    )
     args = parser.parse_args()
 
     watch_path = Path(args.dir)
@@ -159,7 +174,15 @@ def main():
         log.error("Directory does not exist: %s", args.dir)
         sys.exit(1)
 
-    watch_directory(watch_path, args.api, args.interval, args.lat, args.lon, api_key=args.api_key)
+    watch_directory(
+        watch_path,
+        args.api,
+        args.interval,
+        args.lat,
+        args.lon,
+        api_key=args.api_key,
+        model_version=args.model,
+    )
 
 
 if __name__ == "__main__":

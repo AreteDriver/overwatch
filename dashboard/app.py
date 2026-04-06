@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 
 import folium
@@ -67,13 +68,32 @@ def api_delete(path: str):
         return None
 
 
+def api_put(path: str, json_data=None):
+    try:
+        resp = requests.put(f"{API_BASE}{path}", json=json_data, headers=_headers(), timeout=10)
+        resp.raise_for_status()
+        return resp.json()
+    except requests.RequestException:
+        return None
+
+
+def api_download(path: str) -> bytes | None:
+    """Download raw bytes from an export endpoint."""
+    try:
+        resp = requests.get(f"{API_BASE}{path}", headers=_headers(), timeout=30)
+        resp.raise_for_status()
+        return resp.content
+    except requests.RequestException:
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Sidebar
 # ---------------------------------------------------------------------------
 
 with st.sidebar:
     st.title("Overwatch")
-    st.caption("Tactical ISR Dashboard v0.2.0")
+    st.caption("Tactical ISR Dashboard v0.3.0")
 
     st.divider()
 
@@ -131,6 +151,37 @@ with st.sidebar:
                     st.success(f"Geofence '{gf_name}' created")
 
     st.divider()
+
+    with st.expander("Export Data"):
+        det_csv = api_download("/export/detections.csv")
+        st.download_button(
+            "Detections CSV",
+            data=det_csv if det_csv else b"",
+            file_name="detections.csv",
+            mime="text/csv",
+            disabled=det_csv is None,
+            use_container_width=True,
+        )
+        intel_csv = api_download("/export/intel.csv")
+        st.download_button(
+            "Intel CSV",
+            data=intel_csv if intel_csv else b"",
+            file_name="intel.csv",
+            mime="text/csv",
+            disabled=intel_csv is None,
+            use_container_width=True,
+        )
+        telem_csv = api_download("/export/telemetry.csv")
+        st.download_button(
+            "Telemetry CSV",
+            data=telem_csv if telem_csv else b"",
+            file_name="telemetry.csv",
+            mime="text/csv",
+            disabled=telem_csv is None,
+            use_container_width=True,
+        )
+
+    st.divider()
     st.markdown("**Integration Ready:**")
     st.markdown("- [Dossier](https://github.com/AreteDriver/Dossier) — NER + entity resolution")
     st.markdown("- [Animus](https://github.com/AreteDriver/animus) — LLM briefings + memory")
@@ -166,6 +217,8 @@ cols[6].metric("Geofences", stats.get("total_geofences", 0))
     tab_entities,
     tab_mesh,
     tab_alerts,
+    tab_rules,
+    tab_webhooks,
     tab_replay,
 ) = st.tabs(
     [
@@ -176,6 +229,8 @@ cols[6].metric("Geofences", stats.get("total_geofences", 0))
         "Entities",
         "Mesh Health",
         "Alerts",
+        "Rules",
+        "Webhooks",
         "Replay",
     ]
 )
@@ -518,6 +573,112 @@ with tab_alerts:
         st.info("No alerts yet.")
 
 
+# ---- RULES TAB ----
+with tab_rules:
+    rules = api_get("/rules") or []
+    if rules:
+        for rule in rules:
+            r_col1, r_col2, r_col3 = st.columns([5, 2, 1])
+            enabled = rule.get("enabled", True)
+            status_icon = "🟢" if enabled else "⚪"
+            r_col1.markdown(f"{status_icon} **{rule['name']}** — `{rule['rule_type']}`")
+            if r_col2.button(
+                "Disable" if enabled else "Enable",
+                key=f"toggle_rule_{rule['id']}",
+                use_container_width=True,
+            ):
+                api_put(f"/rules/{rule['id']}", {"enabled": not enabled})
+                st.rerun()
+            if r_col3.button("Del", key=f"del_rule_{rule['id']}", use_container_width=True):
+                api_delete(f"/rules/{rule['id']}")
+                st.rerun()
+    else:
+        st.info("No alert rules configured.")
+
+    st.divider()
+    st.markdown("**Create Rule**")
+    with st.form("new_rule_form"):
+        rule_name = st.text_input("Rule name")
+        rule_type = st.selectbox(
+            "Rule type",
+            ["geofence_entity", "detection_count", "entity_new", "custom_field"],
+        )
+        rule_config = st.text_area(
+            "Config (JSON)",
+            value="{}",
+            height=100,
+        )
+        if st.form_submit_button("Create Rule", use_container_width=True):
+            if rule_name:
+                try:
+                    config_parsed = json.loads(rule_config)
+                except json.JSONDecodeError:
+                    st.error("Invalid JSON in config field.")
+                    config_parsed = None
+                if config_parsed is not None:
+                    result = api_post(
+                        "/rules",
+                        json_data={
+                            "name": rule_name,
+                            "rule_type": rule_type,
+                            "config": config_parsed,
+                        },
+                    )
+                    if result:
+                        st.success(f"Rule '{rule_name}' created")
+                        st.rerun()
+                    else:
+                        st.error("Failed to create rule.")
+
+
+# ---- WEBHOOKS TAB ----
+with tab_webhooks:
+    webhooks = api_get("/webhooks") or []
+    if webhooks:
+        for wh in webhooks:
+            wh_col1, wh_col2, wh_col3 = st.columns([5, 2, 1])
+            events_str = ", ".join(wh.get("event_types", []))
+            wh_col1.markdown(f"**{wh['url']}**")
+            wh_col1.caption(f"Events: {events_str}")
+            if wh_col2.button(
+                "Test",
+                key=f"test_wh_{wh['id']}",
+                use_container_width=True,
+            ):
+                result = api_post(f"/webhooks/{wh['id']}/test")
+                if result:
+                    st.success("Test payload sent")
+                else:
+                    st.error("Test failed")
+            if wh_col3.button("Del", key=f"del_wh_{wh['id']}", use_container_width=True):
+                api_delete(f"/webhooks/{wh['id']}")
+                st.rerun()
+    else:
+        st.info("No webhooks registered.")
+
+    st.divider()
+    st.markdown("**Register Webhook**")
+    with st.form("new_webhook_form"):
+        wh_url = st.text_input("Webhook URL")
+        wh_events = st.multiselect(
+            "Event types",
+            ["detection", "intel", "telemetry", "alert"],
+            default=["detection", "alert"],
+        )
+        wh_secret = st.text_input("Secret (optional)", type="password")
+        if st.form_submit_button("Register Webhook", use_container_width=True):
+            if wh_url and wh_events:
+                payload: dict = {"url": wh_url, "event_types": wh_events}
+                if wh_secret:
+                    payload["secret"] = wh_secret
+                result = api_post("/webhooks", json_data=payload)
+                if result:
+                    st.success("Webhook registered")
+                    st.rerun()
+                else:
+                    st.error("Failed to register webhook.")
+
+
 # ---- REPLAY TAB ----
 with tab_replay:
     time_range = api_get("/replay/range")
@@ -528,17 +689,50 @@ with tab_replay:
         replay_start = st.text_input("Start (ISO)", value=time_range["earliest"][:19])
         replay_end = st.text_input("End (ISO)", value=time_range["latest"][:19])
 
+        # Event type filters
+        st.markdown("**Event Types**")
+        evt_col1, evt_col2, evt_col3 = st.columns(3)
+        show_dets = evt_col1.checkbox("Detections", value=True, key="replay_dets")
+        show_telem = evt_col2.checkbox("Telemetry", value=True, key="replay_telem")
+        show_intel = evt_col3.checkbox("Intel", value=True, key="replay_intel")
+
+        # Speed slider
+        replay_speed = st.slider(
+            "Playback speed",
+            min_value=0.25,
+            max_value=8.0,
+            value=1.0,
+            step=0.25,
+            format="%.2fx",
+        )
+
         if st.button("Load Replay Frame"):
+            event_types = []
+            if show_dets:
+                event_types.append("detections")
+            if show_telem:
+                event_types.append("telemetry")
+            if show_intel:
+                event_types.append("intel")
+
             frame = api_get(
                 "/replay/frame",
-                {"start": replay_start, "end": replay_end},
+                {
+                    "start": replay_start,
+                    "end": replay_end,
+                    "event_types": ",".join(event_types),
+                    "speed": replay_speed,
+                },
             )
             if frame:
                 dets = frame.get("detections", [])
                 telem = frame.get("telemetry", [])
+                intel_items = frame.get("intel", [])
 
-                st.metric("Detections in frame", len(dets))
-                st.metric("Telemetry in frame", len(telem))
+                m_col1, m_col2, m_col3 = st.columns(3)
+                m_col1.metric("Detections in frame", len(dets))
+                m_col2.metric("Telemetry in frame", len(telem))
+                m_col3.metric("Intel in frame", len(intel_items))
 
                 # Replay map
                 geo = [d for d in dets if d.get("lat") and d.get("lon")] + [

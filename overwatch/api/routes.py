@@ -8,7 +8,7 @@ import json
 import secrets
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy import desc, func
 from sqlalchemy.orm import Session
 
@@ -76,7 +76,7 @@ from overwatch.models import (
     _new_id,
 )
 from overwatch.retention import purge_old_records
-from overwatch.security import _hash_key
+from overwatch.security import _hash_key, verify_api_key_scoped
 
 router = APIRouter()
 
@@ -92,6 +92,21 @@ def _get_session():
 
 
 # ---------------------------------------------------------------------------
+# Scope-checking dependencies
+# ---------------------------------------------------------------------------
+
+
+def _require_write(request: Request, session: Session = Depends(_get_session)):
+    """Require 'write' scope for ingest endpoints."""
+    verify_api_key_scoped(request, session, "write")
+
+
+def _require_admin(request: Request, session: Session = Depends(_get_session)):
+    """Require 'admin' scope for admin endpoints."""
+    verify_api_key_scoped(request, session, "admin")
+
+
+# ---------------------------------------------------------------------------
 # Ingest endpoints (with event publishing + alert checks)
 # ---------------------------------------------------------------------------
 
@@ -100,6 +115,7 @@ def _get_session():
     "/ingest/detection",
     response_model=DetectionOut | None,
     tags=["ingest"],
+    dependencies=[Depends(_require_write)],
 )
 def post_detection(data: DetectionIn, session: Session = Depends(_get_session)):
     row = ingest_detection(session, data)
@@ -120,6 +136,7 @@ def post_detection(data: DetectionIn, session: Session = Depends(_get_session)):
     "/ingest/detections",
     response_model=list[DetectionOut],
     tags=["ingest"],
+    dependencies=[Depends(_require_write)],
 )
 def post_detections(items: list[DetectionIn], session: Session = Depends(_get_session)):
     results = ingest_detections_batch(session, items)
@@ -132,6 +149,7 @@ def post_detections(items: list[DetectionIn], session: Session = Depends(_get_se
     "/ingest/intel",
     response_model=IntelReportOut | None,
     tags=["ingest"],
+    dependencies=[Depends(_require_write)],
 )
 def post_intel(data: IntelReportIn, session: Session = Depends(_get_session)):
     row = ingest_intel_report(session, data)
@@ -145,6 +163,7 @@ def post_intel(data: IntelReportIn, session: Session = Depends(_get_session)):
     "/ingest/intel/batch",
     response_model=list[IntelReportOut],
     tags=["ingest"],
+    dependencies=[Depends(_require_write)],
 )
 def post_intel_batch(items: list[IntelReportIn], session: Session = Depends(_get_session)):
     return ingest_intel_batch(session, items)
@@ -154,6 +173,7 @@ def post_intel_batch(items: list[IntelReportIn], session: Session = Depends(_get
     "/ingest/telemetry",
     response_model=TelemetryOut | None,
     tags=["ingest"],
+    dependencies=[Depends(_require_write)],
 )
 def post_telemetry(data: TelemetryIn, session: Session = Depends(_get_session)):
     row = ingest_telemetry(session, data)
@@ -168,6 +188,7 @@ def post_telemetry(data: TelemetryIn, session: Session = Depends(_get_session)):
     "/ingest/telemetry/batch",
     response_model=list[TelemetryOut],
     tags=["ingest"],
+    dependencies=[Depends(_require_write)],
 )
 def post_telemetry_batch(items: list[TelemetryIn], session: Session = Depends(_get_session)):
     return ingest_telemetry_batch(session, items)
@@ -364,7 +385,12 @@ def ack_alert(alert_id: str, session: Session = Depends(_get_session)):
 # ---------------------------------------------------------------------------
 
 
-@router.post("/rules", response_model=AlertRuleOut, tags=["rules"])
+@router.post(
+    "/rules",
+    response_model=AlertRuleOut,
+    tags=["rules"],
+    dependencies=[Depends(_require_admin)],
+)
 def post_rule(data: AlertRuleIn, session: Session = Depends(_get_session)):
     """Create a new alerting rule."""
     row = AlertRuleRow(
@@ -386,7 +412,12 @@ def get_rules(session: Session = Depends(_get_session)):
     return [_rule_row_to_out(r) for r in rows]
 
 
-@router.put("/rules/{rule_id}", response_model=AlertRuleOut, tags=["rules"])
+@router.put(
+    "/rules/{rule_id}",
+    response_model=AlertRuleOut,
+    tags=["rules"],
+    dependencies=[Depends(_require_admin)],
+)
 def put_rule(
     rule_id: str,
     data: AlertRuleUpdate,
@@ -409,7 +440,11 @@ def put_rule(
     return _rule_row_to_out(row)
 
 
-@router.delete("/rules/{rule_id}", tags=["rules"])
+@router.delete(
+    "/rules/{rule_id}",
+    tags=["rules"],
+    dependencies=[Depends(_require_admin)],
+)
 def delete_rule(rule_id: str, session: Session = Depends(_get_session)):
     """Delete an alerting rule."""
     row = session.query(AlertRuleRow).filter(AlertRuleRow.id == rule_id).first()
@@ -519,7 +554,12 @@ def get_dashboard_stats(session: Session = Depends(_get_session)):
 # ---------------------------------------------------------------------------
 
 
-@router.post("/webhooks", response_model=WebhookOut, tags=["webhooks"])
+@router.post(
+    "/webhooks",
+    response_model=WebhookOut,
+    tags=["webhooks"],
+    dependencies=[Depends(_require_admin)],
+)
 def post_webhook(data: WebhookIn, session: Session = Depends(_get_session)):
     """Register an external webhook subscription."""
     row = WebhookRow(
@@ -541,7 +581,11 @@ def get_webhooks(session: Session = Depends(_get_session)):
     return [_webhook_row_to_out(r) for r in rows]
 
 
-@router.delete("/webhooks/{webhook_id}", tags=["webhooks"])
+@router.delete(
+    "/webhooks/{webhook_id}",
+    tags=["webhooks"],
+    dependencies=[Depends(_require_admin)],
+)
 def delete_webhook(webhook_id: str, session: Session = Depends(_get_session)):
     """Remove a webhook subscription."""
     row = session.query(WebhookRow).filter(WebhookRow.id == webhook_id).first()
@@ -552,7 +596,11 @@ def delete_webhook(webhook_id: str, session: Session = Depends(_get_session)):
     return {"status": "deleted"}
 
 
-@router.post("/webhooks/{webhook_id}/test", tags=["webhooks"])
+@router.post(
+    "/webhooks/{webhook_id}/test",
+    tags=["webhooks"],
+    dependencies=[Depends(_require_admin)],
+)
 def test_webhook(webhook_id: str, session: Session = Depends(_get_session)):
     """Send a test event to a specific webhook."""
     row = session.query(WebhookRow).filter(WebhookRow.id == webhook_id).first()
@@ -603,7 +651,12 @@ def _webhook_row_to_out(row: WebhookRow) -> WebhookOut:
 # ---------------------------------------------------------------------------
 
 
-@router.post("/admin/keys", response_model=ApiKeyCreated, tags=["admin"])
+@router.post(
+    "/admin/keys",
+    response_model=ApiKeyCreated,
+    tags=["admin"],
+    dependencies=[Depends(_require_admin)],
+)
 def create_api_key(data: ApiKeyCreate, session: Session = Depends(_get_session)):
     """Create a new scoped API key.
 
@@ -632,7 +685,12 @@ def create_api_key(data: ApiKeyCreate, session: Session = Depends(_get_session))
     )
 
 
-@router.get("/admin/keys", response_model=list[ApiKeyOut], tags=["admin"])
+@router.get(
+    "/admin/keys",
+    response_model=list[ApiKeyOut],
+    tags=["admin"],
+    dependencies=[Depends(_require_admin)],
+)
 def list_api_keys(session: Session = Depends(_get_session)):
     """List all API keys (hash never exposed)."""
     rows = session.query(ApiKeyRow).order_by(ApiKeyRow.created_at.desc()).all()
@@ -649,7 +707,11 @@ def list_api_keys(session: Session = Depends(_get_session)):
     ]
 
 
-@router.delete("/admin/keys/{key_id}", tags=["admin"])
+@router.delete(
+    "/admin/keys/{key_id}",
+    tags=["admin"],
+    dependencies=[Depends(_require_admin)],
+)
 def deactivate_api_key(key_id: str, session: Session = Depends(_get_session)):
     """Deactivate an API key (soft delete)."""
     row = session.query(ApiKeyRow).filter(ApiKeyRow.id == key_id).first()
@@ -665,7 +727,11 @@ def deactivate_api_key(key_id: str, session: Session = Depends(_get_session)):
 # ---------------------------------------------------------------------------
 
 
-@router.post("/admin/purge", tags=["admin"])
+@router.post(
+    "/admin/purge",
+    tags=["admin"],
+    dependencies=[Depends(_require_admin)],
+)
 def post_purge(
     retention_days: int = Query(default=30, ge=1),
     session: Session = Depends(_get_session),

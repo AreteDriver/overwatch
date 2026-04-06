@@ -13,6 +13,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from overwatch.events import publish
 from overwatch.models import AlertRow, AlertRuleRow, DetectionRow, EntityRow
 
 log = logging.getLogger(__name__)
@@ -36,6 +37,8 @@ def evaluate_rules(
 
     if fired:
         session.commit()
+        for a in fired:
+            publish("alert", {"alert_type": a.alert_type, "title": a.title, "severity": a.severity})
     return fired
 
 
