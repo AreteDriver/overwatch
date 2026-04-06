@@ -49,3 +49,7 @@ CORS_ORIGINS: list[str] = [
 ]
 RATE_LIMIT_REQUESTS: int = int(os.getenv("OVERWATCH_RATE_LIMIT", "120"))
 RATE_LIMIT_WINDOW: float = float(os.getenv("OVERWATCH_RATE_WINDOW", "60"))
+
+# Data retention (days, 0 = keep forever)
+RETENTION_DAYS: int = int(os.getenv("OVERWATCH_RETENTION_DAYS", "30"))
+RETENTION_PURGE_INTERVAL_HOURS: int = int(os.getenv("OVERWATCH_PURGE_INTERVAL_HOURS", "6"))

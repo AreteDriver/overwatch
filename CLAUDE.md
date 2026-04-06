@@ -5,30 +5,32 @@ Tactical dashboard that unifies YOLO object detections, OSINT intel feeds (TheWi
 
 ## Current State
 
-- **Version**: 0.2.0
+- **Version**: 0.3.0
 - **Language**: Python 3.11+
-- **Tests**: 132
-- **Coverage**: 85%
+- **Tests**: 197
+- **Coverage**: 83%
 - **Live**: API (`overwatch-isr.fly.dev`) + Dashboard (`overwatch-dashboard.fly.dev`)
 
 ## Architecture
 - **Backend**: FastAPI + SQLAlchemy + SQLite (WAL mode) + WebSocket event bus
 - **Dashboard**: Streamlit with Folium maps (heatmap, geofences, draw tools, measure, minimap) + Plotly
-- **Analysis**: Entity resolution, briefing (template + Ollama), alerts, geofencing, mesh health, replay
+- **Analysis**: Entity resolution, briefing (template + Ollama), alerts + rules engine, geofencing, mesh health, replay with filtering
 - **Ingest**: REST endpoints + YOLO file watcher CLI
-- **Real-time**: WebSocket `/ws/feed` broadcasts all ingest events
+- **Real-time**: WebSocket `/ws/feed` broadcasts all ingest events + webhook subscriptions
+- **Admin**: Multi-user scoped API keys, data retention/purge, bulk export (CSV/GeoJSON)
 
 ```
 overwatch/
 ├── overwatch/
-│   ├── api/routes.py          # 25 REST endpoints
-│   ├── app.py                 # FastAPI + WebSocket + health
+│   ├── api/routes.py          # 40+ REST endpoints
+│   ├── app.py                 # FastAPI + WebSocket + health + retention loop
 │   ├── config.py              # Env-driven configuration (21 vars)
 │   ├── database.py            # Engine + session factory
 │   ├── events.py              # In-process async event bus
-│   ├── models.py              # ORM + Pydantic (15 models)
-│   ├── security.py            # Auth, rate-limit, headers middleware
+│   ├── models.py              # ORM + Pydantic (25+ models)
+│   ├── security.py            # Auth, rate-limit, headers, scoped API keys
 │   ├── crypto.py              # Optional Fernet field encryption
+│   ├── retention.py           # Data retention / auto-purge
 │   ├── ingest/
 │   │   ├── detections.py      # YOLO detection ingestion
 │   │   ├── intel.py           # OSINT intel ingestion
@@ -41,19 +43,26 @@ overwatch/
 │       ├── entities.py        # Entity extraction + resolution
 │       ├── geofence.py        # Geofence CRUD + point-in-polygon
 │       ├── mesh_health.py     # Device heartbeat tracking
-│       └── replay.py          # Time-windowed data retrieval
+│       ├── replay.py          # Time-windowed data retrieval + filtering
+│       └── rules.py           # Configurable alerting rules engine
 ├── dashboard/app.py           # Streamlit (8 tabs), reads API_URL + API_KEY from env
 ├── tools/yolo_watcher.py      # CLI: watch dir for YOLO output, --api-key flag
-├── tests/                     # 132 tests, 85% coverage
+├── tests/                     # 197 tests, 83% coverage
 │   ├── conftest.py            # Shared fixtures (engine, session, now)
 │   ├── test_api.py            # REST endpoint tests
+│   ├── test_api_keys.py       # Multi-user API key tests
 │   ├── test_briefing.py       # Briefing generation tests
 │   ├── test_entities.py       # Entity resolution tests
+│   ├── test_export.py         # Bulk export + retention + health tests
 │   ├── test_ingest.py         # Data ingestion tests
 │   ├── test_models.py         # ORM + Pydantic schema tests
 │   ├── test_new_features.py   # New feature tests
+│   ├── test_replay_v2.py      # Replay filtering + speed + summary tests
+│   ├── test_retention.py      # Data retention/purge tests
+│   ├── test_rules.py          # Alert rules engine tests
 │   ├── test_security.py       # Auth, encryption, rate-limit tests
 │   ├── test_smoke.py          # Full write-path integration tests
+│   ├── test_webhooks.py       # Webhook subscription tests
 │   ├── test_websocket.py      # WebSocket feed tests
 │   └── test_yolo_watcher.py   # YOLO watcher CLI tests
 ├── Dockerfile                 # API container (python:3.12-slim + uvicorn)
@@ -85,7 +94,7 @@ python tools/yolo_watcher.py --dir /path/to/yolo/output --lat 46.05 --lon 14.5
 python tools/yolo_watcher.py --dir ./runs --api-key <key>
 
 # Tests
-pytest                       # All 132 tests
+pytest                       # All 197 tests
 pytest -m smoke              # Smoke/integration tests only
 pytest --cov=overwatch       # With coverage report
 
@@ -152,7 +161,8 @@ This tool targets ISR (intelligence, surveillance, reconnaissance) workflows:
 - **Rate limiting**: Sliding window per IP. Configure via `OVERWATCH_RATE_LIMIT` (requests) and `OVERWATCH_RATE_WINDOW` (seconds)
 - **CORS lockdown**: Set `OVERWATCH_CORS_ORIGINS` (JSON array on Fly.io, comma-separated locally)
 - **Field encryption**: Optional Fernet (AES-128-CBC) via `OVERWATCH_ENCRYPTION_KEY`. Install `cryptography` package to enable
-- **Health endpoint**: `/health` is always public (no auth required)
+- **Scoped API keys**: `POST /api/admin/keys` creates keys with scopes (read, write, admin). Raw key returned once; only SHA-256 hash stored. `verify_api_key_scoped()` checks both master key and DB keys
+- **Health endpoint**: `/health` is always public (no auth required), enriched with DB size, event counts, WS connections
 - Security module: `overwatch/security.py`, crypto: `overwatch/crypto.py`
 
 ## Design Decisions
@@ -162,6 +172,12 @@ This tool targets ISR (intelligence, surveillance, reconnaissance) workflows:
 - Ollama briefings fall back to templates if Ollama unavailable
 - YOLO watcher uses polling (not inotify) for cross-platform compatibility
 - Security is opt-in: no API_KEY = open mode (dev-friendly), set key for production
+- Multi-user API keys: scoped (read/write/admin), master key has all scopes, DB-stored keys with SHA-256 hash
+- Webhook subscriptions: HMAC-SHA256 signed payloads, auto-disable after 10 consecutive failures
+- Alert rules engine: 4 rule types (geofence_entity, detection_count, entity_new, custom_field), evaluated on each detection ingest
+- Data retention: background purge loop + manual `/api/admin/purge` endpoint, configurable TTL
+- Bulk export: CSV + GeoJSON endpoints for detections, intel, telemetry (up to 50K rows)
+- Replay filtering: event_types param, speed multiplier, summary endpoint for timeline UI
 - Dashboard deployed as separate Fly.io app (512MB for Streamlit + Folium rendering)
 
 ## Integration Points
@@ -189,3 +205,5 @@ This tool targets ISR (intelligence, surveillance, reconnaissance) workflows:
 | `OVERWATCH_CORS_ORIGINS` | `*` | Allowed origins (JSON array on Fly.io) |
 | `OVERWATCH_RATE_LIMIT` | `120` | Max requests per window per IP |
 | `OVERWATCH_RATE_WINDOW` | `60` | Rate limit window in seconds |
+| `OVERWATCH_RETENTION_DAYS` | `30` | Auto-purge records older than N days (0 = keep forever) |
+| `OVERWATCH_PURGE_INTERVAL_HOURS` | `6` | How often to run background purge (hours) |

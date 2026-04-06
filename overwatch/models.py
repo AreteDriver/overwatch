@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
-from sqlalchemy import Column, DateTime, Float, Index, String, Text
+from sqlalchemy import Column, DateTime, Float, Index, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase
 
 
@@ -133,6 +134,21 @@ class GeofenceRow(Base):
     created_at = Column(DateTime(timezone=True), default=_utcnow)
 
 
+class WebhookRow(Base):
+    """An external webhook subscription."""
+
+    __tablename__ = "webhooks"
+
+    id = Column(String, primary_key=True, default=_new_id)
+    url = Column(String, nullable=False)
+    event_types = Column(Text, nullable=False, default="[]")  # JSON list
+    secret = Column(String, default="")
+    active = Column(Float, default=1)  # 1=true, 0=false
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+    last_delivered_at = Column(DateTime(timezone=True), nullable=True)
+    failure_count = Column(Integer, default=0)
+
+
 class AlertRow(Base):
     """A triggered alert."""
 
@@ -149,6 +165,48 @@ class AlertRow(Base):
     acknowledged = Column(Float, default=0)  # 0=false, 1=true
     created_at = Column(DateTime(timezone=True), default=_utcnow)
     meta_json = Column(Text, default="{}")
+
+
+class ApiKeyRow(Base):
+    """A scoped API key for multi-user auth."""
+
+    __tablename__ = "api_keys"
+
+    id = Column(String, primary_key=True, default=_new_id)
+    name = Column(String, nullable=False)
+    key_hash = Column(String, nullable=False, unique=True)
+    scopes_json = Column(Text, nullable=False, default='["read"]')
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+    last_used_at = Column(DateTime(timezone=True), nullable=True)
+    active = Column(Float, default=1)  # 1=true, 0=false
+
+    @property
+    def scopes(self) -> list[str]:
+        return json.loads(self.scopes_json or "[]")
+
+    @scopes.setter
+    def scopes(self, value: list[str]) -> None:
+        self.scopes_json = json.dumps(value)
+
+
+class RuleType(StrEnum):
+    geofence_entity = "geofence_entity"
+    detection_count = "detection_count"
+    entity_new = "entity_new"
+    custom_field = "custom_field"
+
+
+class AlertRuleRow(Base):
+    """A configurable alerting rule."""
+
+    __tablename__ = "alert_rules"
+
+    id = Column(String, primary_key=True, default=_new_id)
+    name = Column(String, nullable=False)
+    rule_type = Column(String, nullable=False)  # RuleType values
+    enabled = Column(Float, default=1)  # 1=true, 0=false
+    config_json = Column(Text, default="{}")
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
 
 
 # ---------------------------------------------------------------------------
@@ -308,6 +366,58 @@ class AlertOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class WebhookIn(BaseModel):
+    url: str
+    event_types: list[str] = Field(
+        default_factory=lambda: ["detection", "intel", "telemetry", "alert"]
+    )
+    secret: str | None = None
+
+
+class WebhookOut(BaseModel):
+    id: str
+    url: str
+    event_types: list[str] = Field(default_factory=list)
+    active: bool = True
+    created_at: datetime
+    last_delivered_at: datetime | None = None
+    failure_count: int = 0
+
+    model_config = {"from_attributes": True}
+
+
+class ApiKeyScope(StrEnum):
+    read = "read"
+    write = "write"
+    admin = "admin"
+
+
+class ApiKeyCreate(BaseModel):
+    name: str
+    scopes: list[ApiKeyScope] = Field(default_factory=lambda: [ApiKeyScope.read])
+
+
+class ApiKeyOut(BaseModel):
+    id: str
+    name: str
+    scopes: list[str] = Field(default_factory=list)
+    created_at: datetime
+    last_used_at: datetime | None = None
+    active: bool = True
+
+    model_config = {"from_attributes": True}
+
+
+class ApiKeyCreated(BaseModel):
+    """Returned once on creation — includes the raw key (never stored)."""
+
+    id: str
+    name: str
+    key: str
+    scopes: list[str]
+    created_at: datetime
+
+
 class DeviceHealth(BaseModel):
     device_name: str
     last_seen: datetime
@@ -331,5 +441,40 @@ class EntityTimelineEntry(BaseModel):
 
 class ReplayFrame(BaseModel):
     timestamp: datetime
-    detections: list[DetectionOut]
-    telemetry: list[TelemetryOut]
+    detections: list[DetectionOut] = Field(default_factory=list)
+    telemetry: list[TelemetryOut] = Field(default_factory=list)
+    intel: list[IntelReportOut] = Field(default_factory=list)
+    speed: float = 1.0
+    event_types: list[str] = Field(default_factory=list)
+
+
+class ReplaySummary(BaseModel):
+    start: datetime
+    end: datetime
+    detections: int = 0
+    telemetry: int = 0
+    intel: int = 0
+
+
+class AlertRuleIn(BaseModel):
+    name: str
+    rule_type: RuleType
+    config: dict[str, Any] = Field(default_factory=dict)
+
+
+class AlertRuleUpdate(BaseModel):
+    name: str | None = None
+    rule_type: RuleType | None = None
+    enabled: bool | None = None
+    config: dict[str, Any] | None = None
+
+
+class AlertRuleOut(BaseModel):
+    id: str
+    name: str
+    rule_type: str
+    enabled: bool
+    config: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime
+
+    model_config = {"from_attributes": True}

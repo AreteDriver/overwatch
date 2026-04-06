@@ -6,9 +6,11 @@ import hashlib
 import logging
 import time
 from collections import defaultdict
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import HTTPException, Request, WebSocket
+from sqlalchemy.orm import Session
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 
@@ -81,6 +83,83 @@ def verify_ws_api_key(websocket: WebSocket) -> bool:
     token_hash = hashlib.sha256(token.encode()).hexdigest()
     key_hash = hashlib.sha256(API_KEY.encode()).hexdigest()
     return token_hash == key_hash
+
+
+# ---------------------------------------------------------------------------
+# Scoped API Key Authentication
+# ---------------------------------------------------------------------------
+
+
+def _extract_token(request: Request) -> str:
+    """Extract the bearer/API-key token from a request, or empty string."""
+    auth = request.headers.get("Authorization", "")
+    if auth.startswith("Bearer "):
+        return auth[7:]
+    if auth:
+        return auth
+    return request.headers.get("X-API-Key", "")
+
+
+def _hash_key(raw_key: str) -> str:
+    """SHA-256 hex digest of a raw API key."""
+    return hashlib.sha256(raw_key.encode()).hexdigest()
+
+
+def verify_api_key_scoped(
+    request: Request,
+    session: Session,
+    required_scope: str,
+) -> None:
+    """Verify that the request carries a valid API key with the required scope.
+
+    Checks in order:
+    1. If no master API_KEY is configured, allow (open mode).
+    2. Master key (env var) — implicitly has all scopes.
+    3. Database-stored scoped keys — must be active and carry the scope.
+
+    Updates ``last_used_at`` on successful DB key match.
+
+    Raises HTTPException 401/403 on failure.
+    """
+    from overwatch.models import ApiKeyRow
+
+    if not API_KEY:
+        return  # open mode
+
+    if _is_public(request.url.path):
+        return
+
+    token = _extract_token(request)
+    if not token:
+        raise HTTPException(
+            status_code=401,
+            detail="Missing API key. Use Authorization: Bearer <key> or X-API-Key header.",
+        )
+
+    # Check master key first (has all scopes)
+    if _hash_key(token) == _hash_key(API_KEY):
+        return
+
+    # Check database-stored keys
+    token_hash = _hash_key(token)
+    row: ApiKeyRow | None = (
+        session.query(ApiKeyRow)
+        .filter(ApiKeyRow.key_hash == token_hash, ApiKeyRow.active == 1)
+        .first()
+    )
+
+    if row is None:
+        raise HTTPException(status_code=401, detail="Invalid API key.")
+
+    if required_scope not in row.scopes:
+        raise HTTPException(
+            status_code=403,
+            detail=f"API key lacks required scope: {required_scope}",
+        )
+
+    # Update last_used_at
+    row.last_used_at = datetime.now(UTC)
+    session.commit()
 
 
 # ---------------------------------------------------------------------------

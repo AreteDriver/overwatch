@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import csv
+import io
 import json
+import secrets
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import desc, func
 from sqlalchemy.orm import Session
 
@@ -24,7 +27,13 @@ from overwatch.analysis.geofence import (
 )
 from overwatch.analysis.mesh_health import get_device_health
 from overwatch.analysis.ollama_briefing import generate_ollama_briefing
-from overwatch.analysis.replay import get_replay_frame, get_time_range
+from overwatch.analysis.replay import (
+    get_replay_frame,
+    get_replay_summary,
+    get_time_range,
+    parse_event_types,
+)
+from overwatch.analysis.rules import evaluate_rules
 from overwatch.events import publish
 from overwatch.ingest.detections import ingest_detection, ingest_detections_batch
 from overwatch.ingest.intel import ingest_intel_batch, ingest_intel_report
@@ -32,6 +41,14 @@ from overwatch.ingest.telemetry import ingest_telemetry, ingest_telemetry_batch
 from overwatch.models import (
     AlertOut,
     AlertRow,
+    AlertRuleIn,
+    AlertRuleOut,
+    AlertRuleRow,
+    AlertRuleUpdate,
+    ApiKeyCreate,
+    ApiKeyCreated,
+    ApiKeyOut,
+    ApiKeyRow,
     BriefingOut,
     BriefingRow,
     DashboardStats,
@@ -49,10 +66,17 @@ from overwatch.models import (
     IntelReportOut,
     IntelReportRow,
     ReplayFrame,
+    ReplaySummary,
     TelemetryIn,
     TelemetryOut,
     TelemetryRow,
+    WebhookIn,
+    WebhookOut,
+    WebhookRow,
+    _new_id,
 )
+from overwatch.retention import purge_old_records
+from overwatch.security import _hash_key
 
 router = APIRouter()
 
@@ -87,6 +111,8 @@ def post_detection(data: DetectionIn, session: Session = Depends(_get_session)):
     if data.lat is not None and data.lon is not None:
         gfs = list_geofences(session)
         check_geofence_alerts(session, data.lat, data.lon, data.label, data.source_id, gfs)
+    # Configurable rules engine
+    evaluate_rules(session, "detection", data.model_dump())
     return row
 
 
@@ -334,6 +360,79 @@ def ack_alert(alert_id: str, session: Session = Depends(_get_session)):
 
 
 # ---------------------------------------------------------------------------
+# Alert rules CRUD
+# ---------------------------------------------------------------------------
+
+
+@router.post("/rules", response_model=AlertRuleOut, tags=["rules"])
+def post_rule(data: AlertRuleIn, session: Session = Depends(_get_session)):
+    """Create a new alerting rule."""
+    row = AlertRuleRow(
+        name=data.name,
+        rule_type=data.rule_type.value,
+        enabled=1,
+        config_json=json.dumps(data.config),
+    )
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+    return _rule_row_to_out(row)
+
+
+@router.get("/rules", response_model=list[AlertRuleOut], tags=["rules"])
+def get_rules(session: Session = Depends(_get_session)):
+    """List all alerting rules."""
+    rows = session.query(AlertRuleRow).order_by(desc(AlertRuleRow.created_at)).all()
+    return [_rule_row_to_out(r) for r in rows]
+
+
+@router.put("/rules/{rule_id}", response_model=AlertRuleOut, tags=["rules"])
+def put_rule(
+    rule_id: str,
+    data: AlertRuleUpdate,
+    session: Session = Depends(_get_session),
+):
+    """Update an alerting rule (enable/disable, change config)."""
+    row = session.query(AlertRuleRow).filter(AlertRuleRow.id == rule_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Rule not found")
+    if data.name is not None:
+        row.name = data.name
+    if data.rule_type is not None:
+        row.rule_type = data.rule_type.value
+    if data.enabled is not None:
+        row.enabled = 1 if data.enabled else 0
+    if data.config is not None:
+        row.config_json = json.dumps(data.config)
+    session.commit()
+    session.refresh(row)
+    return _rule_row_to_out(row)
+
+
+@router.delete("/rules/{rule_id}", tags=["rules"])
+def delete_rule(rule_id: str, session: Session = Depends(_get_session)):
+    """Delete an alerting rule."""
+    row = session.query(AlertRuleRow).filter(AlertRuleRow.id == rule_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Rule not found")
+    session.delete(row)
+    session.commit()
+    return {"status": "deleted"}
+
+
+def _rule_row_to_out(row: AlertRuleRow) -> AlertRuleOut:
+    """Convert an AlertRuleRow to AlertRuleOut, parsing JSON fields."""
+    return AlertRuleOut(
+        id=row.id,
+        name=row.name,
+        rule_type=row.rule_type,
+        enabled=bool(row.enabled),
+        config=json.loads(row.config_json or "{}"),
+        created_at=row.created_at,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Mesh health
 # ---------------------------------------------------------------------------
 
@@ -361,14 +460,35 @@ def get_replay_range(session: Session = Depends(_get_session)):
 def get_frame(
     start: datetime,
     end: datetime,
+    event_types: str | None = Query(
+        default=None,
+        description="Comma-separated filter: detections,telemetry,intel",
+    ),
+    speed: float = Query(default=1.0, gt=0.0, le=16.0, description="Playback speed multiplier"),
     session: Session = Depends(_get_session),
 ):
-    data = get_replay_frame(session, start, end)
+    """Get a replay frame with optional event filtering and speed control."""
+    parsed_types = parse_event_types(event_types)
+    data = get_replay_frame(session, start, end, event_types=parsed_types)
     return ReplayFrame(
         timestamp=start,
         detections=data["detections"],
         telemetry=data["telemetry"],
+        intel=data["intel"],
+        speed=speed,
+        event_types=sorted(parsed_types),
     )
+
+
+@router.get("/replay/summary", response_model=ReplaySummary, tags=["replay"])
+def get_replay_summary_endpoint(
+    start: datetime,
+    end: datetime,
+    session: Session = Depends(_get_session),
+):
+    """Get per-event-type counts in a time range for timeline scrubbing UI."""
+    data = get_replay_summary(session, start, end)
+    return ReplaySummary(**data)
 
 
 # ---------------------------------------------------------------------------
@@ -392,3 +512,379 @@ def get_dashboard_stats(session: Session = Depends(_get_session)):
         latest_detection=latest_det,
         latest_intel=latest_intel,
     )
+
+
+# ---------------------------------------------------------------------------
+# Webhook subscriptions
+# ---------------------------------------------------------------------------
+
+
+@router.post("/webhooks", response_model=WebhookOut, tags=["webhooks"])
+def post_webhook(data: WebhookIn, session: Session = Depends(_get_session)):
+    """Register an external webhook subscription."""
+    row = WebhookRow(
+        url=data.url,
+        event_types=json.dumps(data.event_types),
+        secret=data.secret or "",
+        active=1,
+    )
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+    return _webhook_row_to_out(row)
+
+
+@router.get("/webhooks", response_model=list[WebhookOut], tags=["webhooks"])
+def get_webhooks(session: Session = Depends(_get_session)):
+    """List all registered webhooks."""
+    rows = session.query(WebhookRow).order_by(desc(WebhookRow.created_at)).all()
+    return [_webhook_row_to_out(r) for r in rows]
+
+
+@router.delete("/webhooks/{webhook_id}", tags=["webhooks"])
+def delete_webhook(webhook_id: str, session: Session = Depends(_get_session)):
+    """Remove a webhook subscription."""
+    row = session.query(WebhookRow).filter(WebhookRow.id == webhook_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Webhook not found")
+    session.delete(row)
+    session.commit()
+    return {"status": "deleted"}
+
+
+@router.post("/webhooks/{webhook_id}/test", tags=["webhooks"])
+def test_webhook(webhook_id: str, session: Session = Depends(_get_session)):
+    """Send a test event to a specific webhook."""
+    row = session.query(WebhookRow).filter(WebhookRow.id == webhook_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Webhook not found")
+
+    test_payload = {
+        "event": "test",
+        "data": {"message": "Overwatch webhook test", "webhook_id": webhook_id},
+        "timestamp": datetime.now().isoformat(),
+    }
+    body_bytes = json.dumps(test_payload).encode()
+
+    headers: dict[str, str] = {"Content-Type": "application/json"}
+    if row.secret:
+        import hashlib
+        import hmac
+
+        sig = hmac.new(row.secret.encode(), body_bytes, hashlib.sha256).hexdigest()
+        headers["X-Overwatch-Signature"] = sig
+
+    try:
+        import httpx
+
+        with httpx.Client(timeout=5.0) as client:
+            resp = client.post(row.url, content=body_bytes, headers=headers)
+            resp.raise_for_status()
+        return {"status": "delivered", "status_code": resp.status_code}
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Delivery failed: {exc}") from exc
+
+
+def _webhook_row_to_out(row: WebhookRow) -> WebhookOut:
+    """Convert a WebhookRow to WebhookOut, parsing JSON fields."""
+    return WebhookOut(
+        id=row.id,
+        url=row.url,
+        event_types=json.loads(row.event_types or "[]"),
+        active=bool(row.active),
+        created_at=row.created_at,
+        last_delivered_at=row.last_delivered_at,
+        failure_count=row.failure_count or 0,
+    )
+
+
+# ---------------------------------------------------------------------------
+# API Key Management
+# ---------------------------------------------------------------------------
+
+
+@router.post("/admin/keys", response_model=ApiKeyCreated, tags=["admin"])
+def create_api_key(data: ApiKeyCreate, session: Session = Depends(_get_session)):
+    """Create a new scoped API key.
+
+    Returns the raw key ONCE in the response body. Only the SHA-256 hash is stored.
+    """
+    raw_key = secrets.token_urlsafe(32)
+    key_hash = _hash_key(raw_key)
+
+    row = ApiKeyRow(
+        id=_new_id(),
+        name=data.name,
+        key_hash=key_hash,
+        scopes_json=json.dumps([s.value for s in data.scopes]),
+        active=1,
+    )
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+
+    return ApiKeyCreated(
+        id=row.id,
+        name=row.name,
+        key=raw_key,
+        scopes=row.scopes,
+        created_at=row.created_at,
+    )
+
+
+@router.get("/admin/keys", response_model=list[ApiKeyOut], tags=["admin"])
+def list_api_keys(session: Session = Depends(_get_session)):
+    """List all API keys (hash never exposed)."""
+    rows = session.query(ApiKeyRow).order_by(ApiKeyRow.created_at.desc()).all()
+    return [
+        ApiKeyOut(
+            id=r.id,
+            name=r.name,
+            scopes=r.scopes,
+            created_at=r.created_at,
+            last_used_at=r.last_used_at,
+            active=bool(r.active),
+        )
+        for r in rows
+    ]
+
+
+@router.delete("/admin/keys/{key_id}", tags=["admin"])
+def deactivate_api_key(key_id: str, session: Session = Depends(_get_session)):
+    """Deactivate an API key (soft delete)."""
+    row = session.query(ApiKeyRow).filter(ApiKeyRow.id == key_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="API key not found")
+    row.active = 0
+    session.commit()
+    return {"status": "deactivated", "id": key_id}
+
+
+# ---------------------------------------------------------------------------
+# Data retention
+# ---------------------------------------------------------------------------
+
+
+@router.post("/admin/purge", tags=["admin"])
+def post_purge(
+    retention_days: int = Query(default=30, ge=1),
+    session: Session = Depends(_get_session),
+):
+    """Manually purge records older than retention_days."""
+    results = purge_old_records(session, retention_days)
+    return {"purged": results, "retention_days": retention_days}
+
+
+# ---------------------------------------------------------------------------
+# Bulk export (CSV / GeoJSON)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/export/detections.csv", tags=["export"])
+def export_detections_csv(
+    limit: int = Query(default=10000, le=50000),
+    label: str | None = None,
+    session: Session = Depends(_get_session),
+):
+    """Export detections as CSV."""
+    q = session.query(DetectionRow).order_by(desc(DetectionRow.detected_at))
+    if label:
+        q = q.filter(DetectionRow.label == label)
+    rows = q.limit(limit).all()
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(
+        [
+            "id",
+            "source_id",
+            "label",
+            "confidence",
+            "lat",
+            "lon",
+            "source_name",
+            "detected_at",
+            "created_at",
+        ]
+    )
+    for r in rows:
+        writer.writerow(
+            [
+                r.id,
+                r.source_id,
+                r.label,
+                r.confidence,
+                r.lat,
+                r.lon,
+                r.source_name,
+                r.detected_at,
+                r.created_at,
+            ]
+        )
+
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="detections.csv"'},
+    )
+
+
+@router.get("/export/detections.geojson", tags=["export"])
+def export_detections_geojson(
+    limit: int = Query(default=10000, le=50000),
+    label: str | None = None,
+    session: Session = Depends(_get_session),
+):
+    """Export detections as GeoJSON FeatureCollection."""
+    q = session.query(DetectionRow).order_by(desc(DetectionRow.detected_at))
+    if label:
+        q = q.filter(DetectionRow.label == label)
+    q = q.filter(DetectionRow.lat.isnot(None), DetectionRow.lon.isnot(None))
+    rows = q.limit(limit).all()
+
+    features = []
+    for r in rows:
+        features.append(
+            {
+                "type": "Feature",
+                "geometry": {"type": "Point", "coordinates": [r.lon, r.lat]},
+                "properties": {
+                    "id": r.id,
+                    "label": r.label,
+                    "confidence": r.confidence,
+                    "source_name": r.source_name,
+                    "detected_at": r.detected_at.isoformat() if r.detected_at else None,
+                },
+            }
+        )
+
+    return {"type": "FeatureCollection", "features": features}
+
+
+@router.get("/export/intel.csv", tags=["export"])
+def export_intel_csv(
+    limit: int = Query(default=10000, le=50000),
+    session: Session = Depends(_get_session),
+):
+    """Export intel reports as CSV."""
+    rows = (
+        session.query(IntelReportRow).order_by(desc(IntelReportRow.published_at)).limit(limit).all()
+    )
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(
+        [
+            "id",
+            "source_id",
+            "title",
+            "summary",
+            "source_name",
+            "source_url",
+            "published_at",
+            "created_at",
+        ]
+    )
+    for r in rows:
+        writer.writerow(
+            [
+                r.id,
+                r.source_id,
+                r.title,
+                r.summary,
+                r.source_name,
+                r.source_url,
+                r.published_at,
+                r.created_at,
+            ]
+        )
+
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="intel.csv"'},
+    )
+
+
+@router.get("/export/telemetry.csv", tags=["export"])
+def export_telemetry_csv(
+    limit: int = Query(default=10000, le=50000),
+    device: str | None = None,
+    session: Session = Depends(_get_session),
+):
+    """Export telemetry as CSV."""
+    q = session.query(TelemetryRow).order_by(desc(TelemetryRow.recorded_at))
+    if device:
+        q = q.filter(TelemetryRow.device_name == device)
+    rows = q.limit(limit).all()
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(
+        [
+            "id",
+            "source_id",
+            "device_name",
+            "lat",
+            "lon",
+            "altitude",
+            "heading",
+            "speed",
+            "battery_pct",
+            "recorded_at",
+        ]
+    )
+    for r in rows:
+        writer.writerow(
+            [
+                r.id,
+                r.source_id,
+                r.device_name,
+                r.lat,
+                r.lon,
+                r.altitude,
+                r.heading,
+                r.speed,
+                r.battery_pct,
+                r.recorded_at,
+            ]
+        )
+
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="telemetry.csv"'},
+    )
+
+
+@router.get("/export/telemetry.geojson", tags=["export"])
+def export_telemetry_geojson(
+    limit: int = Query(default=10000, le=50000),
+    device: str | None = None,
+    session: Session = Depends(_get_session),
+):
+    """Export telemetry as GeoJSON FeatureCollection."""
+    q = session.query(TelemetryRow).order_by(desc(TelemetryRow.recorded_at))
+    if device:
+        q = q.filter(TelemetryRow.device_name == device)
+    rows = q.limit(limit).all()
+
+    features = []
+    for r in rows:
+        features.append(
+            {
+                "type": "Feature",
+                "geometry": {"type": "Point", "coordinates": [r.lon, r.lat]},
+                "properties": {
+                    "id": r.id,
+                    "device_name": r.device_name,
+                    "altitude": r.altitude,
+                    "heading": r.heading,
+                    "speed": r.speed,
+                    "battery_pct": r.battery_pct,
+                    "recorded_at": r.recorded_at.isoformat() if r.recorded_at else None,
+                },
+            }
+        )
+
+    return {"type": "FeatureCollection", "features": features}

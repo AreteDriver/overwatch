@@ -66,7 +66,8 @@ overwatch/
 │       └── replay.py         # Time-windowed data retrieval
 ├── dashboard/app.py          # Streamlit dashboard (8 tabs)
 ├── tools/yolo_watcher.py     # CLI: watch dir for YOLO output
-└── tests/                    # 104 tests, 83% coverage
+├── retention.py              # Data retention + auto-purge
+└── tests/                    # 132+ tests, 85% coverage
 ```
 
 **Stack**: FastAPI + SQLAlchemy + SQLite (WAL mode) + Streamlit + Folium + Plotly
@@ -110,10 +111,24 @@ overwatch/
 | GET | `/api/geofences` | List geofences |
 | DELETE | `/api/geofences/{id}` | Delete geofence |
 
+### Export
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/export/detections.csv` | Export detections as CSV |
+| GET | `/api/export/detections.geojson` | Export detections as GeoJSON |
+| GET | `/api/export/intel.csv` | Export intel reports as CSV |
+| GET | `/api/export/telemetry.csv` | Export telemetry as CSV |
+| GET | `/api/export/telemetry.geojson` | Export telemetry as GeoJSON |
+
+### Admin
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/admin/purge` | Manually purge old records |
+
 ### System
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/health` | Health check (always public) |
+| GET | `/health` | Health check (enriched — counts, DB size, WS connections) |
 | WS | `/ws/feed` | Real-time event stream |
 
 ## Environment Variables
@@ -134,6 +149,8 @@ overwatch/
 | `OLLAMA_URL` | `http://localhost:11434` | Ollama API endpoint |
 | `OLLAMA_MODEL` | `qwen2.5:14b` | Model for LLM briefings |
 | `OLLAMA_ENABLED` | `false` | Enable Ollama-powered briefings |
+| `OVERWATCH_RETENTION_DAYS` | `30` | Auto-purge records older than N days (0 = keep forever) |
+| `OVERWATCH_PURGE_INTERVAL_HOURS` | `6` | How often to run auto-purge (hours) |
 
 ## Security
 
@@ -166,7 +183,7 @@ Production secrets are set via `flyctl secrets set`. The health endpoint at `/he
 
 ```bash
 # Run tests
-pytest                          # All 104 tests
+pytest                          # All tests
 pytest -m smoke                 # Smoke/integration tests
 pytest --cov=overwatch          # With coverage report
 
