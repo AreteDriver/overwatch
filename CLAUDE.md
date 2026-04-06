@@ -7,8 +7,8 @@ Tactical dashboard that unifies YOLO object detections, OSINT intel feeds (TheWi
 
 - **Version**: 0.3.0
 - **Language**: Python 3.11+
-- **Tests**: 251
-- **Coverage**: 89%
+- **Tests**: 296
+- **Coverage**: 94%
 - **Live**: API (`overwatch-isr.fly.dev`) + Dashboard (`overwatch-dashboard.fly.dev`)
 
 ## Architecture
@@ -47,7 +47,7 @@ overwatch/
 │       └── rules.py           # Configurable alerting rules engine
 ├── dashboard/app.py           # Streamlit (8 tabs), reads API_URL + API_KEY from env
 ├── tools/yolo_watcher.py      # CLI: watch dir for YOLO output, --api-key flag
-├── tests/                     # 251 tests, 89% coverage
+├── tests/                     # 296 tests, 94% coverage
 │   ├── conftest.py            # Shared fixtures (engine, session, now)
 │   ├── test_api.py            # REST endpoint tests
 │   ├── test_api_keys.py       # Multi-user API key tests
@@ -96,7 +96,7 @@ python tools/yolo_watcher.py --dir /path/to/yolo/output --lat 46.05 --lon 14.5
 python tools/yolo_watcher.py --dir ./runs --api-key <key>
 
 # Tests
-pytest                       # All 251 tests
+pytest                       # All 296 tests
 pytest -m smoke              # Smoke/integration tests only
 pytest --cov=overwatch       # With coverage report
 

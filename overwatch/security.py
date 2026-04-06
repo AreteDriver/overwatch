@@ -84,17 +84,39 @@ def verify_api_key(request: Request, session_factory: object | None = None) -> N
     raise HTTPException(status_code=401, detail="Invalid API key.")
 
 
-def verify_ws_api_key(websocket: WebSocket) -> bool:
-    """Verify API key for WebSocket from query param ?key=..."""
+def verify_ws_api_key(websocket: WebSocket, session_factory: object | None = None) -> bool:
+    """Verify API key for WebSocket from query param ?key=...
+
+    Accepts master key or any active DB-stored key.
+    """
     if not API_KEY:
         return True
 
     token = websocket.query_params.get("key", "")
     if not token:
         return False
-    token_hash = hashlib.sha256(token.encode()).hexdigest()
-    key_hash = hashlib.sha256(API_KEY.encode()).hexdigest()
-    return token_hash == key_hash
+
+    # Check master key
+    if _hash_key(token) == _hash_key(API_KEY):
+        return True
+
+    # Check DB keys
+    if session_factory is not None:
+        from overwatch.models import ApiKeyRow
+
+        session = session_factory()
+        try:
+            row = (
+                session.query(ApiKeyRow)
+                .filter(ApiKeyRow.key_hash == _hash_key(token), ApiKeyRow.active == 1)
+                .first()
+            )
+            if row is not None:
+                return True
+        finally:
+            session.close()
+
+    return False
 
 
 # ---------------------------------------------------------------------------

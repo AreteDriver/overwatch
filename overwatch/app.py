@@ -178,7 +178,8 @@ async def websocket_feed(websocket: WebSocket):
 
     Authenticate with ?key=<api_key> query param if API_KEY is set.
     """
-    if not verify_ws_api_key(websocket):
+    sf = getattr(app.state, "session_factory", None)
+    if not verify_ws_api_key(websocket, session_factory=sf):
         await websocket.close(code=4001, reason="Invalid API key")
         return
 
