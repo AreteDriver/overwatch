@@ -24,6 +24,7 @@ CEILINGS: dict[str, int] = {
     "overwatch.analysis.rules": 2,
     "overwatch.api.routes": 32,
     "overwatch.app": 1,
+    "overwatch.crypto": 0,
     "overwatch.database": 2,
     "overwatch.models": 3,
     "overwatch.security": 7,

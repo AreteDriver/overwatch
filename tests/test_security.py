@@ -145,11 +145,18 @@ class TestRateLimiting:
 class TestCrypto:
     def test_no_key_passthrough(self):
         """Without encryption key, encrypt/decrypt are no-ops."""
-        with patch("overwatch.crypto.ENCRYPTION_KEY", ""), patch("overwatch.crypto._fernet", None):
-            from overwatch.crypto import decrypt, encrypt
+        import overwatch.config
+        from overwatch.crypto import _reset_fernet, decrypt, encrypt
 
+        orig = overwatch.config.ENCRYPTION_KEY
+        try:
+            overwatch.config.ENCRYPTION_KEY = ""
+            _reset_fernet()
             assert encrypt("hello") == "hello"
             assert decrypt("hello") == "hello"
+        finally:
+            overwatch.config.ENCRYPTION_KEY = orig
+            _reset_fernet()
 
     def test_hash_deterministic(self):
         from overwatch.crypto import hash_value

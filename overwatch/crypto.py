@@ -13,40 +13,64 @@ from __future__ import annotations
 import hashlib
 import logging
 
-from overwatch.config import ENCRYPTION_KEY
+import overwatch.config
 
 log = logging.getLogger(__name__)
 
+# Lazy singleton — initialized on first use rather than at import time.
+# This avoids side effects during module import and makes the module
+# testable without importlib.reload gymnastics.
 _fernet = None
 
-if ENCRYPTION_KEY:
-    try:
-        from cryptography.fernet import Fernet
 
-        _fernet = Fernet(ENCRYPTION_KEY.encode())
-        log.info("Field encryption enabled")
-    except ImportError:
-        log.warning(
-            "OVERWATCH_ENCRYPTION_KEY set but 'cryptography' not installed. "
-            "Install with: pip install cryptography"
-        )
-    except Exception as exc:
-        log.error("Invalid encryption key: %s", exc)
+def _get_fernet():
+    """Return a cached Fernet instance, or None if no key / bad key / missing package.
+
+    Thread-safe for CPython because the GIL protects the singleton assignment.
+    For other interpreters, the worst case is a redundant Fernet() construction.
+    """
+    global _fernet
+    if _fernet is not None:
+        return _fernet
+
+    if overwatch.config.ENCRYPTION_KEY:
+        try:
+            from cryptography.fernet import Fernet
+
+            _fernet = Fernet(overwatch.config.ENCRYPTION_KEY.encode())
+            log.info("Field encryption enabled")
+        except ImportError:
+            log.warning(
+                "OVERWATCH_ENCRYPTION_KEY set but 'cryptography' not installed. "
+                "Install with: pip install cryptography"
+            )
+        except Exception as exc:
+            log.error("Invalid encryption key: %s", exc)
+
+    return _fernet
+
+
+def _reset_fernet() -> None:
+    """Reset the cached Fernet instance (for testing only)."""
+    global _fernet
+    _fernet = None
 
 
 def encrypt(plaintext: str) -> str:
     """Encrypt a string. Returns base64-encoded ciphertext, or plaintext if no key."""
-    if _fernet is None:
+    f = _get_fernet()
+    if f is None:
         return plaintext
-    return _fernet.encrypt(plaintext.encode()).decode()
+    return f.encrypt(plaintext.encode()).decode()  # type: ignore[no-any-return,union-attr]
 
 
 def decrypt(ciphertext: str) -> str:
     """Decrypt a string. Returns plaintext, or the input unchanged if no key."""
-    if _fernet is None:
+    f = _get_fernet()
+    if f is None:
         return ciphertext
     try:
-        return _fernet.decrypt(ciphertext.encode()).decode()
+        return f.decrypt(ciphertext.encode()).decode()  # type: ignore[no-any-return,union-attr]
     except Exception:
         # If decryption fails, it's likely unencrypted data from before key was set
         return ciphertext

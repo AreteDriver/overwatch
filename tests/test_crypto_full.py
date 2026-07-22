@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import builtins
-import importlib
 import logging
 from unittest.mock import patch
 
@@ -115,37 +114,40 @@ class TestWithFernet:
 
 
 # ---------------------------------------------------------------------------
-# 4. Module-level import: invalid key
+# 4. Lazy initialization: invalid key
 # ---------------------------------------------------------------------------
 
 
-class TestModuleLevelInvalidKey:
+class TestLazyInvalidKey:
     def test_invalid_key_logs_error(self, caplog):
         """An invalid ENCRYPTION_KEY logs an error but does not crash."""
         import overwatch.config
+        from overwatch.crypto import _get_fernet, _reset_fernet
 
         orig = overwatch.config.ENCRYPTION_KEY
         try:
             overwatch.config.ENCRYPTION_KEY = "not-a-valid-fernet-key"
+            _reset_fernet()
             with caplog.at_level(logging.ERROR, logger="overwatch.crypto"):
-                importlib.reload(importlib.import_module("overwatch.crypto"))
+                _get_fernet()
             assert any("Invalid encryption key" in r.message for r in caplog.records)
         finally:
             overwatch.config.ENCRYPTION_KEY = orig
-            importlib.reload(importlib.import_module("overwatch.crypto"))
+            _reset_fernet()
 
 
 # ---------------------------------------------------------------------------
-# 5. Module-level import: cryptography package missing
+# 5. Lazy initialization: cryptography package missing
 # ---------------------------------------------------------------------------
 
 
-class TestModuleLevelMissingPackage:
+class TestLazyMissingPackage:
     def test_missing_cryptography_logs_warning(self, caplog):
         """When cryptography is not installed, a warning is logged."""
         import sys
 
         import overwatch.config
+        from overwatch.crypto import _get_fernet, _reset_fernet
 
         real_import = builtins.__import__
 
@@ -157,6 +159,7 @@ class TestModuleLevelMissingPackage:
         orig = overwatch.config.ENCRYPTION_KEY
         try:
             overwatch.config.ENCRYPTION_KEY = "some-key-value"
+            _reset_fernet()
             with (
                 patch("builtins.__import__", side_effect=fake_import),
                 caplog.at_level(logging.WARNING, logger="overwatch.crypto"),
@@ -164,11 +167,11 @@ class TestModuleLevelMissingPackage:
                 # Remove cached cryptography module so the import path is hit
                 saved = sys.modules.pop("cryptography.fernet", None)
                 try:
-                    importlib.reload(importlib.import_module("overwatch.crypto"))
+                    _get_fernet()
                 finally:
                     if saved is not None:
                         sys.modules["cryptography.fernet"] = saved
             assert any("cryptography" in r.message for r in caplog.records)
         finally:
             overwatch.config.ENCRYPTION_KEY = orig
-            importlib.reload(importlib.import_module("overwatch.crypto"))
+            _reset_fernet()
