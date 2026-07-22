@@ -7,7 +7,7 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -130,10 +130,10 @@ async def auth_middleware(request, call_next):
     try:
         sf = getattr(app.state, "session_factory", None)
         verify_api_key(request, session_factory=sf)
-    except Exception as exc:
+    except HTTPException as exc:
         return JSONResponse(
-            status_code=getattr(exc, "status_code", 401),
-            content={"detail": str(getattr(exc, "detail", "Unauthorized"))},
+            status_code=exc.status_code,
+            content={"detail": exc.detail},
         )
     return await call_next(request)
 

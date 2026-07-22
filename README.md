@@ -26,6 +26,9 @@ cd overwatch
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev,dashboard]"
 
+# Run database migrations (creates/overwrites SQLite schema)
+alembic upgrade head
+
 # Start the API server
 uvicorn overwatch.app:app --reload --port 8080
 
@@ -64,10 +67,12 @@ overwatch/
 │       ├── geofence.py       # Geofence CRUD + point-in-polygon
 │       ├── mesh_health.py    # Device heartbeat tracking
 │       └── replay.py         # Time-windowed data retrieval
+├── alembic/                  # Database migrations (Alembic)
 ├── dashboard/app.py          # Streamlit dashboard (8 tabs)
 ├── tools/yolo_watcher.py     # CLI: watch dir for YOLO output
+├── scripts/                  # Dev tooling (mypy ratchet, etc.)
 ├── retention.py              # Data retention + auto-purge
-└── tests/                    # 132+ tests, 85% coverage
+└── tests/                    # 290+ tests, 85% coverage
 ```
 
 **Stack**: FastAPI + SQLAlchemy + SQLite (WAL mode) + Streamlit + Folium + Plotly
@@ -190,6 +195,12 @@ pytest --cov=overwatch          # With coverage report
 # Lint (always run both)
 ruff check .
 ruff format .
+
+# Type check
+python -m mypy overwatch --ignore-missing-imports --show-error-codes --no-error-summary
+
+# Type ratchet (fails if any module exceeds its error ceiling)
+python scripts/mypy-ratchet.py
 ```
 
 ## Integration Points
