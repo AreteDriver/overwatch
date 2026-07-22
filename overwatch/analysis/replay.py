@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 
 from sqlalchemy import and_, func
@@ -16,8 +17,13 @@ from overwatch.models import (
     TelemetryRow,
 )
 
+log = logging.getLogger(__name__)
+
 # Valid event type tokens for filtering
 VALID_EVENT_TYPES = {"detections", "telemetry", "intel"}
+
+# Safety cap to prevent unbounded queries from exhausting memory
+MAX_REPLAY_RECORDS = 5000
 
 
 def parse_event_types(raw: str | None) -> set[str]:
@@ -57,8 +63,11 @@ def get_replay_frame(
                     DetectionRow.detected_at <= end,
                 )
             )
+            .limit(MAX_REPLAY_RECORDS)
             .all()
         )
+        if len(rows) == MAX_REPLAY_RECORDS:
+            log.warning("Replay detection query capped at %d records", MAX_REPLAY_RECORDS)
         detections = [DetectionOut.model_validate(d) for d in rows]
 
     if "telemetry" in types:
@@ -70,8 +79,11 @@ def get_replay_frame(
                     TelemetryRow.recorded_at <= end,
                 )
             )
+            .limit(MAX_REPLAY_RECORDS)
             .all()
         )
+        if len(rows) == MAX_REPLAY_RECORDS:
+            log.warning("Replay telemetry query capped at %d records", MAX_REPLAY_RECORDS)
         telemetry = [TelemetryOut.model_validate(t) for t in rows]
 
     if "intel" in types:
@@ -83,8 +95,11 @@ def get_replay_frame(
                     IntelReportRow.published_at <= end,
                 )
             )
+            .limit(MAX_REPLAY_RECORDS)
             .all()
         )
+        if len(rows) == MAX_REPLAY_RECORDS:
+            log.warning("Replay intel query capped at %d records", MAX_REPLAY_RECORDS)
         intel = [IntelReportOut.model_validate(i) for i in rows]
 
     return {

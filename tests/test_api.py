@@ -2,58 +2,9 @@
 
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 
 import pytest
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
-
-from overwatch.api.routes import _get_session, router
-from overwatch.models import Base
-
-
-def _make_test_app():
-    """Create a fresh FastAPI app with in-memory SQLite for testing."""
-    engine = create_engine(
-        "sqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    Base.metadata.create_all(engine)
-    factory = sessionmaker(bind=engine, expire_on_commit=False)
-
-    @asynccontextmanager
-    async def lifespan(app: FastAPI):
-        yield
-
-    test_app = FastAPI(lifespan=lifespan)
-    test_app.add_middleware(
-        CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
-    )
-    test_app.include_router(router, prefix="/api")
-
-    def override_session():
-        sess = factory()
-        try:
-            yield sess
-        finally:
-            sess.close()
-
-    test_app.dependency_overrides[_get_session] = override_session
-    return test_app, engine
-
-
-@pytest.fixture()
-def client():
-    test_app, engine = _make_test_app()
-    with TestClient(test_app) as c:
-        yield c
-    engine.dispose()
 
 
 @pytest.fixture()

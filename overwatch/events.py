@@ -68,21 +68,18 @@ def publish(event_type: str, data: dict[str, Any]) -> None:
             log.exception("Event handler error")
 
 
-def dispatch_webhooks(
+def _dispatch_webhooks_sync(
     session_factory: Callable,
     event_type: str,
     payload: dict[str, Any],
 ) -> int:
-    """POST event payload to all active webhooks matching the event_type.
-
-    Returns the number of successfully delivered webhooks.
-    """
+    """Synchronous implementation of webhook dispatch."""
     from overwatch.models import WebhookRow
 
     session = session_factory()
     delivered = 0
     try:
-        webhooks = session.query(WebhookRow).filter(WebhookRow.active == 1).all()
+        webhooks = session.query(WebhookRow).filter(WebhookRow.active.is_(True)).all()
 
         body_bytes = json.dumps(payload, default=str).encode()
 
@@ -124,3 +121,30 @@ def dispatch_webhooks(
         session.close()
 
     return delivered
+
+
+def dispatch_webhooks(
+    session_factory: Callable,
+    event_type: str,
+    payload: dict[str, Any],
+) -> int:
+    """POST event payload to all active webhooks matching the event_type.
+
+    When called from an async context, the blocking work is offloaded to a
+    background thread so the event loop is not blocked.  When called from a
+    sync context the work runs directly.
+
+    Returns the number of successfully delivered webhooks.
+    """
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    if loop is not None:
+        asyncio.create_task(
+            asyncio.to_thread(_dispatch_webhooks_sync, session_factory, event_type, payload)
+        )
+        return 0
+
+    return _dispatch_webhooks_sync(session_factory, event_type, payload)

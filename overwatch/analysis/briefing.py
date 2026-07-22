@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import desc
@@ -29,6 +30,63 @@ from overwatch.models import (
 log = logging.getLogger(__name__)
 
 
+@dataclass
+class BriefingContext:
+    """Aggregated data context for briefing generation."""
+
+    detections: list[DetectionRow]
+    intel_reports: list[IntelReportRow]
+    telemetry: list[TelemetryRow]
+    entities: list[EntityRow]
+
+
+def _gather_briefing_context(
+    session: Session,
+    cutoff: datetime,
+    max_items: int = BRIEFING_MAX_ITEMS,
+    entity_limit: int = 10,
+) -> BriefingContext:
+    """Gather recent data for briefing generation."""
+    detections = (
+        session.query(DetectionRow)
+        .filter(DetectionRow.detected_at >= cutoff)
+        .order_by(desc(DetectionRow.detected_at))
+        .limit(max_items)
+        .all()
+    )
+
+    intel_reports = (
+        session.query(IntelReportRow)
+        .filter(IntelReportRow.published_at >= cutoff)
+        .order_by(desc(IntelReportRow.published_at))
+        .limit(max_items)
+        .all()
+    )
+
+    telemetry = (
+        session.query(TelemetryRow)
+        .filter(TelemetryRow.recorded_at >= cutoff)
+        .order_by(desc(TelemetryRow.recorded_at))
+        .limit(max_items)
+        .all()
+    )
+
+    entities = (
+        session.query(EntityRow)
+        .filter(EntityRow.last_seen >= cutoff)
+        .order_by(desc(EntityRow.sighting_count))
+        .limit(entity_limit)
+        .all()
+    )
+
+    return BriefingContext(
+        detections=detections,
+        intel_reports=intel_reports,
+        telemetry=telemetry,
+        entities=entities,
+    )
+
+
 def generate_briefing(
     session: Session,
     lookback_hours: int | None = None,
@@ -38,38 +96,11 @@ def generate_briefing(
     cutoff = datetime.now(UTC) - timedelta(hours=hours)
     now = datetime.now(UTC)
 
-    # Gather recent data
-    detections = (
-        session.query(DetectionRow)
-        .filter(DetectionRow.detected_at >= cutoff)
-        .order_by(desc(DetectionRow.detected_at))
-        .limit(BRIEFING_MAX_ITEMS)
-        .all()
-    )
-
-    intel_reports = (
-        session.query(IntelReportRow)
-        .filter(IntelReportRow.published_at >= cutoff)
-        .order_by(desc(IntelReportRow.published_at))
-        .limit(BRIEFING_MAX_ITEMS)
-        .all()
-    )
-
-    telemetry = (
-        session.query(TelemetryRow)
-        .filter(TelemetryRow.recorded_at >= cutoff)
-        .order_by(desc(TelemetryRow.recorded_at))
-        .limit(BRIEFING_MAX_ITEMS)
-        .all()
-    )
-
-    entities = (
-        session.query(EntityRow)
-        .filter(EntityRow.last_seen >= cutoff)
-        .order_by(desc(EntityRow.sighting_count))
-        .limit(10)
-        .all()
-    )
+    ctx = _gather_briefing_context(session, cutoff)
+    detections = ctx.detections
+    intel_reports = ctx.intel_reports
+    telemetry = ctx.telemetry
+    entities = ctx.entities
 
     # Build detection summary
     label_counts: dict[str, int] = {}

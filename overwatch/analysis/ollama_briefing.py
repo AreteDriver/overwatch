@@ -16,24 +16,21 @@ import logging
 from datetime import UTC, datetime, timedelta
 
 import httpx
-from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
-from overwatch.analysis.briefing import generate_briefing as template_briefing
+from overwatch.analysis.briefing import (
+    _gather_briefing_context,
+)
+from overwatch.analysis.briefing import (
+    generate_briefing as template_briefing,
+)
 from overwatch.config import (
     BRIEFING_LOOKBACK_HOURS,
-    BRIEFING_MAX_ITEMS,
     OLLAMA_ENABLED,
     OLLAMA_MODEL,
     OLLAMA_URL,
 )
-from overwatch.models import (
-    BriefingRow,
-    DetectionRow,
-    EntityRow,
-    IntelReportRow,
-    TelemetryRow,
-)
+from overwatch.models import BriefingRow
 
 log = logging.getLogger(__name__)
 
@@ -50,35 +47,11 @@ def generate_ollama_briefing(
     cutoff = datetime.now(UTC) - timedelta(hours=hours)
     now = datetime.now(UTC)
 
-    # Gather context
-    detections = (
-        session.query(DetectionRow)
-        .filter(DetectionRow.detected_at >= cutoff)
-        .order_by(desc(DetectionRow.detected_at))
-        .limit(BRIEFING_MAX_ITEMS)
-        .all()
-    )
-    intel_reports = (
-        session.query(IntelReportRow)
-        .filter(IntelReportRow.published_at >= cutoff)
-        .order_by(desc(IntelReportRow.published_at))
-        .limit(BRIEFING_MAX_ITEMS)
-        .all()
-    )
-    telemetry = (
-        session.query(TelemetryRow)
-        .filter(TelemetryRow.recorded_at >= cutoff)
-        .order_by(desc(TelemetryRow.recorded_at))
-        .limit(BRIEFING_MAX_ITEMS)
-        .all()
-    )
-    entities = (
-        session.query(EntityRow)
-        .filter(EntityRow.last_seen >= cutoff)
-        .order_by(desc(EntityRow.sighting_count))
-        .limit(10)
-        .all()
-    )
+    ctx = _gather_briefing_context(session, cutoff)
+    detections = ctx.detections
+    intel_reports = ctx.intel_reports
+    telemetry = ctx.telemetry
+    entities = ctx.entities
 
     # Build context for LLM
     context_parts = []

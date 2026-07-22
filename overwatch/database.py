@@ -2,14 +2,19 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
+from alembic.config import Config
 from sqlalchemy import create_engine, event
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
+from alembic import command
 from overwatch.config import DATABASE_URL
 from overwatch.models import Base
+
+log = logging.getLogger(__name__)
 
 
 def _enable_wal(dbapi_conn: object, _connection_record: object) -> None:
@@ -40,6 +45,15 @@ def get_engine(url: str | None = None) -> Engine:
 
 def init_db(engine: Engine) -> None:
     Base.metadata.create_all(engine)
+
+
+def run_migrations(engine: Engine | None = None) -> None:
+    """Run Alembic migrations to bring the database to the current schema."""
+    alembic_cfg = Config("alembic.ini")
+    if engine is not None:
+        alembic_cfg.attributes["connection"] = engine.connect()
+    command.upgrade(alembic_cfg, "head")
+    log.info("Database migrations applied successfully")
 
 
 def get_session_factory(engine: Engine) -> sessionmaker[Session]:

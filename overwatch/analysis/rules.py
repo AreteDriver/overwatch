@@ -25,7 +25,7 @@ def evaluate_rules(
     event_data: dict[str, Any],
 ) -> list[AlertRow]:
     """Check all enabled rules against an event and create alerts for matches."""
-    rules = session.query(AlertRuleRow).filter(AlertRuleRow.enabled == 1).all()
+    rules = session.query(AlertRuleRow).filter(AlertRuleRow.enabled.is_(True)).all()
     fired: list[AlertRow] = []
 
     for rule in rules:

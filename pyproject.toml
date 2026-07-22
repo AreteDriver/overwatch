@@ -34,6 +34,8 @@ dev = [
     "pytest-asyncio>=0.24.0",
     "httpx>=0.27.0",
     "ruff>=0.8.0",
+    "alembic>=1.13",
+    "mypy>=1.10",
 ]
 
 [tool.setuptools.packages.find]
@@ -49,6 +51,41 @@ asyncio_mode = "auto"
 [tool.ruff]
 target-version = "py311"
 line-length = 100
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+show_error_codes = true
+
+# Ratchet: per-module error ceilings — run `mypy --no-error-summary overwatch`
+# and update these counts as you fix type errors.
+# Modules not listed here use the default (no ceiling).
+# To add a new module, run mypy and append the count.
+[[tool.mypy.overrides]]
+module = [
+    "overwatch.analysis.alerts",
+    "overwatch.analysis.briefing",
+    "overwatch.analysis.entities",
+    "overwatch.analysis.geofence",
+    "overwatch.analysis.mesh_health",
+    "overwatch.analysis.ollama_briefing",
+    "overwatch.analysis.replay",
+    "overwatch.analysis.rules",
+    "overwatch.api.routes",
+    "overwatch.app",
+    "overwatch.database",
+    "overwatch.events",
+    "overwatch.ingest.detections",
+    "overwatch.ingest.intel",
+    "overwatch.ingest.telemetry",
+    "overwatch.ingest.thewire_adapter",
+    "overwatch.models",
+    "overwatch.retention",
+    "overwatch.security",
+]
+disallow_untyped_defs = false
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W", "UP"]

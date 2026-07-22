@@ -81,7 +81,7 @@ class TestGeofenceEntityRule:
         rule = AlertRuleRow(
             name="person in zone alpha",
             rule_type="geofence_entity",
-            enabled=1,
+            enabled=True,
             config_json=json.dumps({"label": "person", "geofence_id": "gf-1"}),
         )
         session.add(rule)
@@ -110,7 +110,7 @@ class TestGeofenceEntityRule:
         rule = AlertRuleRow(
             name="person only",
             rule_type="geofence_entity",
-            enabled=1,
+            enabled=True,
             config_json=json.dumps({"label": "person", "geofence_id": "gf-1"}),
         )
         session.add(rule)
@@ -138,7 +138,7 @@ class TestGeofenceEntityRule:
         rule = AlertRuleRow(
             name="person in zone alpha",
             rule_type="geofence_entity",
-            enabled=1,
+            enabled=True,
             config_json=json.dumps({"label": "person", "geofence_id": "gf-1"}),
         )
         session.add(rule)
@@ -174,7 +174,7 @@ class TestDetectionCountRule:
         rule = AlertRuleRow(
             name="drone swarm",
             rule_type="detection_count",
-            enabled=1,
+            enabled=True,
             config_json=json.dumps({"label": "drone", "count": 5, "window_minutes": 10}),
         )
         session.add(rule)
@@ -207,7 +207,7 @@ class TestDetectionCountRule:
         rule = AlertRuleRow(
             name="drone swarm",
             rule_type="detection_count",
-            enabled=1,
+            enabled=True,
             config_json=json.dumps({"label": "drone", "count": 5, "window_minutes": 10}),
         )
         session.add(rule)
@@ -229,7 +229,7 @@ class TestEntityNewRule:
         rule = AlertRuleRow(
             name="new vehicle",
             rule_type="entity_new",
-            enabled=1,
+            enabled=True,
             config_json=json.dumps({"entity_type": "vehicle"}),
         )
         session.add(rule)
@@ -257,7 +257,7 @@ class TestEntityNewRule:
         rule = AlertRuleRow(
             name="new vehicle",
             rule_type="entity_new",
-            enabled=1,
+            enabled=True,
             config_json=json.dumps({"entity_type": "vehicle"}),
         )
         session.add(rule)
@@ -279,7 +279,7 @@ class TestCustomFieldRule:
         rule = AlertRuleRow(
             name="yolov8 check",
             rule_type="custom_field",
-            enabled=1,
+            enabled=True,
             config_json=json.dumps({"field": "model", "operator": "eq", "value": "yolov8n"}),
         )
         session.add(rule)
@@ -300,7 +300,7 @@ class TestCustomFieldRule:
         rule = AlertRuleRow(
             name="yolov8 check",
             rule_type="custom_field",
-            enabled=1,
+            enabled=True,
             config_json=json.dumps({"field": "model", "operator": "eq", "value": "yolov8n"}),
         )
         session.add(rule)
@@ -323,7 +323,7 @@ class TestDisabledRule:
         rule = AlertRuleRow(
             name="disabled",
             rule_type="entity_new",
-            enabled=0,
+            enabled=False,
             config_json=json.dumps({"entity_type": "vehicle"}),
         )
         session.add(rule)

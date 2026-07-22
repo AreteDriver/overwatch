@@ -48,7 +48,7 @@ def _make_rule(session, *, rule_type, name="test-rule", config=None):
     rule = AlertRuleRow(
         name=name,
         rule_type=rule_type,
-        enabled=1,
+        enabled=True,
         config_json=json.dumps(config or {}),
     )
     session.add(rule)

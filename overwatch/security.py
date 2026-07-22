@@ -73,7 +73,7 @@ def verify_api_key(request: Request, session_factory: object | None = None) -> N
         try:
             row = (
                 session.query(ApiKeyRow)
-                .filter(ApiKeyRow.key_hash == _hash_key(token), ApiKeyRow.active == 1)
+                .filter(ApiKeyRow.key_hash == _hash_key(token), ApiKeyRow.active.is_(True))
                 .first()
             )
             if row is not None:
@@ -108,7 +108,7 @@ def verify_ws_api_key(websocket: WebSocket, session_factory: object | None = Non
         try:
             row = (
                 session.query(ApiKeyRow)
-                .filter(ApiKeyRow.key_hash == _hash_key(token), ApiKeyRow.active == 1)
+                .filter(ApiKeyRow.key_hash == _hash_key(token), ApiKeyRow.active.is_(True))
                 .first()
             )
             if row is not None:
@@ -178,7 +178,7 @@ def verify_api_key_scoped(
     token_hash = _hash_key(token)
     row: ApiKeyRow | None = (
         session.query(ApiKeyRow)
-        .filter(ApiKeyRow.key_hash == token_hash, ApiKeyRow.active == 1)
+        .filter(ApiKeyRow.key_hash == token_hash, ApiKeyRow.active.is_(True))
         .first()
     )
 

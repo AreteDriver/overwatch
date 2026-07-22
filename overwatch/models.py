@@ -9,7 +9,7 @@ from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
-from sqlalchemy import Column, DateTime, Float, Index, Integer, String, Text
+from sqlalchemy import Boolean, Column, DateTime, Float, Index, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase
 
 
@@ -129,8 +129,8 @@ class GeofenceRow(Base):
     id = Column(String, primary_key=True, default=_new_id)
     name = Column(String, nullable=False)
     coords_json = Column(Text, nullable=False)  # [[lat,lon], ...]
-    alert_on_enter = Column(Float, default=1)  # 1=true, 0=false
-    alert_on_exit = Column(Float, default=0)
+    alert_on_enter = Column(Boolean, default=True)
+    alert_on_exit = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), default=_utcnow)
 
 
@@ -143,7 +143,7 @@ class WebhookRow(Base):
     url = Column(String, nullable=False)
     event_types = Column(Text, nullable=False, default="[]")  # JSON list
     secret = Column(String, default="")
-    active = Column(Float, default=1)  # 1=true, 0=false
+    active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), default=_utcnow)
     last_delivered_at = Column(DateTime(timezone=True), nullable=True)
     failure_count = Column(Integer, default=0)
@@ -162,7 +162,7 @@ class AlertRow(Base):
     source_id = Column(String, default="")
     lat = Column(Float)
     lon = Column(Float)
-    acknowledged = Column(Float, default=0)  # 0=false, 1=true
+    acknowledged = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), default=_utcnow)
     meta_json = Column(Text, default="{}")
 
@@ -178,7 +178,7 @@ class ApiKeyRow(Base):
     scopes_json = Column(Text, nullable=False, default='["read"]')
     created_at = Column(DateTime(timezone=True), default=_utcnow)
     last_used_at = Column(DateTime(timezone=True), nullable=True)
-    active = Column(Float, default=1)  # 1=true, 0=false
+    active = Column(Boolean, default=True)
 
     @property
     def scopes(self) -> list[str]:
@@ -204,7 +204,7 @@ class AlertRuleRow(Base):
     id = Column(String, primary_key=True, default=_new_id)
     name = Column(String, nullable=False)
     rule_type = Column(String, nullable=False)  # RuleType values
-    enabled = Column(Float, default=1)  # 1=true, 0=false
+    enabled = Column(Boolean, default=True)
     config_json = Column(Text, default="{}")
     created_at = Column(DateTime(timezone=True), default=_utcnow)
 

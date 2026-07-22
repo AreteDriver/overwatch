@@ -80,7 +80,7 @@ def _make_webhook(session, *, url="https://hook.example.com/cb", event_types=Non
         url=url,
         event_types=json.dumps(event_types or ["detection"]),
         secret=secret,
-        active=1,
+        active=True,
         failure_count=0,
     )
     session.add(wh)
@@ -196,7 +196,7 @@ class TestFailureCounting:
         assert delivered == 0
         session.refresh(wh)
         assert wh.failure_count == 1
-        assert wh.active == 1  # still active after 1 failure
+        assert wh.active is True  # still active after 1 failure
 
     def test_auto_deactivation_after_max_failures(self, session_factory, session):
         wh = _make_webhook(session)
@@ -215,7 +215,7 @@ class TestFailureCounting:
 
         session.refresh(wh)
         assert wh.failure_count == MAX_FAILURES
-        assert wh.active == 0  # deactivated
+        assert wh.active is False  # deactivated
 
     def test_success_resets_failure_count(self, session_factory, session):
         wh = _make_webhook(session)

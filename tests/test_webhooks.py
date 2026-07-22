@@ -112,10 +112,12 @@ class TestWebhookCRUD:
 
 
 class TestWebhookModel:
-    def test_webhook_row_defaults(self):
+    def test_webhook_row_defaults(self, session):
         row = WebhookRow(
             url="https://test.com",
             event_types=json.dumps(["detection"]),
         )
-        assert row.active is None or row.active == 1  # default
+        session.add(row)
+        session.flush()
+        assert row.active is True
         assert row.failure_count is None or row.failure_count == 0

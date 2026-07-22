@@ -366,7 +366,7 @@ def get_alerts(
 ):
     q = session.query(AlertRow).order_by(desc(AlertRow.created_at))
     if unacknowledged_only:
-        q = q.filter(AlertRow.acknowledged == 0)
+        q = q.filter(AlertRow.acknowledged.is_(False))
     return q.limit(limit).all()
 
 
@@ -375,7 +375,7 @@ def ack_alert(alert_id: str, session: Session = Depends(_get_session)):
     row = session.query(AlertRow).filter(AlertRow.id == alert_id).first()
     if not row:
         raise HTTPException(status_code=404, detail="Alert not found")
-    row.acknowledged = 1
+    row.acknowledged = True
     session.commit()
     return {"status": "acknowledged"}
 
@@ -396,7 +396,7 @@ def post_rule(data: AlertRuleIn, session: Session = Depends(_get_session)):
     row = AlertRuleRow(
         name=data.name,
         rule_type=data.rule_type.value,
-        enabled=1,
+        enabled=True,
         config_json=json.dumps(data.config),
     )
     session.add(row)
@@ -432,7 +432,7 @@ def put_rule(
     if data.rule_type is not None:
         row.rule_type = data.rule_type.value
     if data.enabled is not None:
-        row.enabled = 1 if data.enabled else 0
+        row.enabled = data.enabled
     if data.config is not None:
         row.config_json = json.dumps(data.config)
     session.commit()
@@ -566,7 +566,7 @@ def post_webhook(data: WebhookIn, session: Session = Depends(_get_session)):
         url=data.url,
         event_types=json.dumps(data.event_types),
         secret=data.secret or "",
-        active=1,
+        active=True,
     )
     session.add(row)
     session.commit()
@@ -670,7 +670,7 @@ def create_api_key(data: ApiKeyCreate, session: Session = Depends(_get_session))
         name=data.name,
         key_hash=key_hash,
         scopes_json=json.dumps([s.value for s in data.scopes]),
-        active=1,
+        active=True,
     )
     session.add(row)
     session.commit()

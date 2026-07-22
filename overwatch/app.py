@@ -12,8 +12,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from overwatch.api.routes import _get_session, router
-from overwatch.config import CORS_ORIGINS, RETENTION_DAYS, RETENTION_PURGE_INTERVAL_HOURS
-from overwatch.database import get_engine, get_session_factory, init_db
+from overwatch.config import (
+    CORS_ORIGINS,
+    DATABASE_URL,
+    RETENTION_DAYS,
+    RETENTION_PURGE_INTERVAL_HOURS,
+)
+from overwatch.database import get_engine, get_session_factory, init_db, run_migrations
 from overwatch.events import (
     dispatch_webhooks,
     register_sync_handler,
@@ -49,7 +54,14 @@ async def _retention_loop(session_factory, interval_hours: int) -> None:
 async def lifespan(app: FastAPI):
     """Initialize database on startup."""
     engine = get_engine()
-    init_db(engine)
+    if DATABASE_URL.startswith("sqlite://") and (
+        ":memory:" in DATABASE_URL or "///" not in DATABASE_URL
+    ):
+        # In-memory SQLite — use create_all (migrations don't apply to ephemeral DBs)
+        init_db(engine)
+    else:
+        # File-based SQLite or other persistent databases — run Alembic migrations
+        run_migrations(engine)
     session_factory = get_session_factory(engine)
 
     def session_dep():

@@ -16,8 +16,8 @@ def create_geofence(session: Session, data: GeofenceIn) -> GeofenceRow:
     row = GeofenceRow(
         name=data.name,
         coords_json=json.dumps(data.coords),
-        alert_on_enter=1.0 if data.alert_on_enter else 0.0,
-        alert_on_exit=1.0 if data.alert_on_exit else 0.0,
+        alert_on_enter=data.alert_on_enter,
+        alert_on_exit=data.alert_on_exit,
     )
     session.add(row)
     session.commit()

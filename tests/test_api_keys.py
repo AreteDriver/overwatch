@@ -53,6 +53,7 @@ def client():
 class TestApiKeyCRUD:
     def test_create_key(self, client):
         c, _ = client
+        c, _ = client
         resp = c.post(
             "/api/admin/keys",
             json={"name": "watcher-node-1", "scopes": ["write"]},
@@ -167,7 +168,7 @@ class TestScopedAuth:
             name="test",
             key_hash=_hash_key(raw_key),
             scopes_json='["read", "write"]',
-            active=1,
+            active=True,
         )
         sess.add(row)
         sess.commit()
@@ -200,7 +201,7 @@ class TestScopedAuth:
             name="readonly",
             key_hash=_hash_key(raw_key),
             scopes_json='["read"]',
-            active=1,
+            active=True,
         )
         sess.add(row)
         sess.commit()
@@ -232,7 +233,7 @@ class TestScopedAuth:
             name="dead",
             key_hash=_hash_key(raw_key),
             scopes_json='["read"]',
-            active=0,
+            active=False,
         )
         sess.add(row)
         sess.commit()
